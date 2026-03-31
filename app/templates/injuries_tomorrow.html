@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Injury Report — NBA Dashboard{% endblock %}
+
+{% block content %}
+
+{# ── Page header ──────────────────────────────────────────────────── #}
+<section>
+  <h2>
+    Injury Report
+    <span class="date-label">{{ tomorrow }}</span>
+  </h2>
+
+  {# Report timestamp banner #}
+  <div class="report-meta">
+    {% if report_date and report_time %}
+      <span class="report-badge">Official NBA Report</span>
+      Issued <strong>{{ report_time }}</strong> on {{ report_date }}
+    {% elif report_date %}
+      <span class="report-badge">Official NBA Report</span>
+      Issued {{ report_date }}
+    {% else %}
+      <span class="report-badge report-badge-warn">No report data</span>
+      Run <code>python scripts/ingest_all.py</code> to fetch the latest report.
+    {% endif %}
+  </div>
+
+  {# ── No games at all ──────────────────────────────────────────────── #}
+  {% if not matchups and not unmatched %}
+  <p class="empty">
+    No injury data found for {{ tomorrow }}.
+    {% if not report_date %}
+      Fetch data first with <code>python scripts/ingest_all.py</code>.
+    {% else %}
+      The report may not yet list games for this date.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {# ── One card per matchup ─────────────────────────────────────────── #}
+  {% for m in matchups %}
+  {% set g = m.game %}
+  <article class="im-card">
+
+    {# Header: VIS @ HOME · time #}
+    <div class="im-header">
+      <div class="im-teams">
+        <span class="im-abbr">{{ g.visitor_abbr }}</span>
+        <span class="im-vs">@</span>
+        <span class="im-abbr">{{ g.home_abbr }}</span>
+      </div>
+      {% if m.game_time %}
+        <span class="im-time">{{ m.game_time }}</span>
+      {% endif %}
+      {% set total = m.visitor_injuries | length + m.home_injuries | length %}
+      <span class="im-count">
+        {% if total == 0 %}No listings{% elif total == 1 %}1 player listed{% else %}{{ total }} players listed{% endif %}
+      </span>
+    </div>
+
+    {# Body: two columns, one per team #}
+    <div class="im-body">
+
+      {# Visitor team #}
+      <div class="im-col">
+        <div class="im-team-hdr">{{ g.visitor_name }}</div>
+        {% if m.visitor_injuries %}
+          {% for inj in m.visitor_injuries %}
+          {{ _render_injury(inj) }}
+          {% endfor %}
+        {% else %}
+          <p class="im-clean">No injury listings</p>
+        {% endif %}
+      </div>
+
+      {# Home team #}
+      <div class="im-col im-col-right">
+        <div class="im-team-hdr">{{ g.home_name }}</div>
+        {% if m.home_injuries %}
+          {% for inj in m.home_injuries %}
+          {{ _render_injury(inj) }}
+          {% endfor %}
+        {% else %}
+          <p class="im-clean">No injury listings</p>
+        {% endif %}
+      </div>
+
+    </div>{# /.im-body #}
+  </article>
+  {% endfor %}
+
+  {# ── Injuries not matched to a game ──────────────────────────────── #}
+  {% if unmatched %}
+  <article class="im-card im-card-orphan">
+    <div class="im-header">
+      <div class="im-teams">
+        <span class="im-abbr-sm">Other listings</span>
+      </div>
+      <span class="im-count">Game schedule not yet fetched</span>
+    </div>
+    <div class="im-body im-body-single">
+      <div class="im-col">
+        {% for inj in unmatched %}
+        {{ _render_injury(inj) }}
+        {% endfor %}
+      </div>
+    </div>
+  </article>
+  {% endif %}
+
+</section>
+
+{# ── Macro: one injury row ────────────────────────────────────────── #}
+{% macro _render_injury(inj) %}
+{% set slug = (inj.player_status or '') | lower | replace(' ', '-') %}
+<div class="ir-row ir-{{ slug }}">
+  <div class="ir-top">
+    <span class="ir-name">{{ inj.player_first }} {{ inj.player_last }}</span>
+    <span class="badge badge-{{ slug }}">{{ inj.player_status or '?' }}</span>
+  </div>
+  {% if inj.player_comment %}
+  <div class="ir-comment">{{ inj.player_comment }}</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% endblock %}

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \":*)",
+      "Bash(python3 -c \":*)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''app/main.py''\\).read\\(\\)\\); print\\(''OK — no syntax errors''\\)\")",
+      "Bash(python3 -c \"import starlette, fastapi; print\\(''starlette:'', starlette.__version__\\); print\\(''fastapi:  '', fastapi.__version__\\)\")",
+      "Bash(pip3 list:*)",
+      "Bash(pip list:*)",
+      "Bash(python3 -m pip list)",
+      "Bash(xargs -I{} basename {})",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''app/main.py''\\).read\\(\\)\\); print\\(''syntax OK''\\)\")"
+    ]
+  }
+}

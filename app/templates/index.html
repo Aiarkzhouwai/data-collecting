@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{# ── Yesterday's Games ───────────────────────────────────────────── #}
+<section>
+  <h2>Yesterday's Results <span class="date-label">{{ yesterday }}</span></h2>
+
+  {% if yesterday_games %}
+  <div class="games-grid">
+    {% for g in yesterday_games %}
+    <a class="game-card final" href="/games/yesterday#game-{{ g.game_id }}">
+      <div class="logo-row">
+        <img class="team-logo" src="{{ g.visitor_logo }}" alt="{{ g.visitor_abbr }}" onerror="this.style.display='none'">
+        <img class="team-logo" src="{{ g.home_logo }}" alt="{{ g.home_abbr }}" onerror="this.style.display='none'">
+      </div>
+      <div class="matchup">
+
+        {# Visitor #}
+        <div class="team
+          {% if g.visitor_pts is not none and g.home_pts is not none
+             and g.visitor_pts > g.home_pts %}winner{% endif %}">
+          <span class="abbr">{{ g.visitor_abbr }}</span>
+          <span class="pts">{{ g.visitor_pts if g.visitor_pts is not none else '—' }}</span>
+          {% if g.visitor_reb is not none or g.visitor_ast is not none %}
+          <span class="mini-stats">{{ g.visitor_reb or '—' }}R · {{ g.visitor_ast or '—' }}A</span>
+          {% endif %}
+        </div>
+
+        <span class="at">@</span>
+
+        {# Home #}
+        <div class="team
+          {% if g.home_pts is not none and g.visitor_pts is not none
+             and g.home_pts > g.visitor_pts %}winner{% endif %}">
+          <span class="abbr">{{ g.home_abbr }}</span>
+          <span class="pts">{{ g.home_pts if g.home_pts is not none else '—' }}</span>
+          {% if g.home_reb is not none or g.home_ast is not none %}
+          <span class="mini-stats">{{ g.home_reb or '—' }}R · {{ g.home_ast or '—' }}A</span>
+          {% endif %}
+        </div>
+
+      </div>
+      <div class="card-footer">
+        <span class="status">{{ g.status_text }}</span>
+        <span class="box-link">Box scores →</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <p class="empty">No games found for {{ yesterday }}.</p>
+  {% endif %}
+</section>
+
+{# ── Tomorrow's Schedule ─────────────────────────────────────────── #}
+<section>
+  <h2>Tomorrow's Schedule <span class="date-label">{{ tomorrow }}</span></h2>
+
+  {% if tomorrow_games %}
+  <div class="games-grid">
+    {% for g in tomorrow_games %}
+    <a class="game-card scheduled" href="/injuries/tomorrow">
+      <div class="logo-row">
+        <img class="team-logo" src="{{ g.visitor_logo }}" alt="{{ g.visitor_abbr }}" onerror="this.style.display='none'">
+        <img class="team-logo" src="{{ g.home_logo }}" alt="{{ g.home_abbr }}" onerror="this.style.display='none'">
+      </div>
+      <div class="matchup">
+        <div class="team">
+          <span class="abbr">{{ g.visitor_abbr }}</span>
+          <span class="team-name">{{ g.visitor_name }}</span>
+        </div>
+        <span class="at">@</span>
+        <div class="team">
+          <span class="abbr">{{ g.home_abbr }}</span>
+          <span class="team-name">{{ g.home_name }}</span>
+        </div>
+      </div>
+      <div class="card-footer">
+        <span class="status">{{ g.status_text }}</span>
+        <span class="box-link">Injuries →</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <p class="empty">No games scheduled for {{ tomorrow }}.</p>
+  {% endif %}
+</section>
+
+{# ── Injury Report ───────────────────────────────────────────────── #}
+<section>
+  <h2>Injury Report <span class="date-label">latest</span> <a href="/injuries/tomorrow" class="section-link">Full report →</a></h2>
+
+  {% if injuries %}
+  <div class="table-wrap">
+    <table class="injury-table">
+      <thead>
+        <tr>
+          <th>Team</th>
+          <th>Player</th>
+          <th>Status</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inj in injuries %}
+        <tr class="row-{{ inj.player_status | lower | replace(' ', '-') if inj.player_status else 'unknown' }}">
+          <td><span class="abbr-sm">{{ inj.team_abbr }}</span></td>
+          <td>{{ inj.player_first }} {{ inj.player_last }}</td>
+          <td>
+            <span class="badge badge-{{ inj.player_status | lower | replace(' ', '-') if inj.player_status else 'unknown' }}">
+              {{ inj.player_status }}
+            </span>
+          </td>
+          <td class="comment">{{ inj.player_comment }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% else %}
+  <p class="empty">No injury data available.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

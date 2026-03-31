@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Yesterday's Games — NBA Dashboard{% endblock %}
+
+{% block content %}
+
+<section>
+  <h2>Yesterday's Games <span class="date-label">{{ yesterday }}</span></h2>
+
+  {% if not game_details %}
+  <p class="empty">No games found for {{ yesterday }}. Run <code>python scripts/ingest_all.py</code> to fetch data.</p>
+  {% endif %}
+
+  {% for detail in game_details %}
+  {% set g  = detail.game %}
+  {% set vs = detail.visitor_stats %}
+  {% set hs = detail.home_stats %}
+  {% set visitor_won = g.visitor_pts is not none and g.home_pts is not none and g.visitor_pts > g.home_pts %}
+  {% set home_won    = g.home_pts is not none and g.visitor_pts is not none and g.home_pts > g.visitor_pts %}
+
+  <article class="gd" id="game-{{ g.game_id }}">
+
+    {# ── Score header ──────────────────────────────────────────────── #}
+    <div class="gd-header">
+      <div class="gd-team {{ 'gd-winner' if visitor_won }}">
+        <span class="gd-abbr">{{ g.visitor_abbr }}</span>
+        <span class="gd-full">{{ g.visitor_name }}</span>
+        <span class="gd-score">{{ g.visitor_pts if g.visitor_pts is not none else '—' }}</span>
+      </div>
+
+      <div class="gd-sep">
+        <span class="gd-status">{{ g.status_text }}</span>
+        <span class="gd-at">FINAL</span>
+      </div>
+
+      <div class="gd-team gd-team-right {{ 'gd-winner' if home_won }}">
+        <span class="gd-score">{{ g.home_pts if g.home_pts is not none else '—' }}</span>
+        <span class="gd-abbr">{{ g.home_abbr }}</span>
+        <span class="gd-full">{{ g.home_name }}</span>
+      </div>
+    </div>
+
+    {# ── Team stat comparison ──────────────────────────────────────── #}
+    {% if vs and hs %}
+    <div class="gd-teamstats">
+      {% set rows = [
+        ("FG",   (vs.fgm|default(0)) ~ "/" ~ (vs.fga|default(0)),
+                 (hs.fgm|default(0)) ~ "/" ~ (hs.fga|default(0))),
+        ("3PT",  (vs.fg3m|default(0)) ~ "/" ~ (vs.fg3a|default(0)),
+                 (hs.fg3m|default(0)) ~ "/" ~ (hs.fg3a|default(0))),
+        ("FT",   (vs.ftm|default(0)) ~ "/" ~ (vs.fta|default(0)),
+                 (hs.ftm|default(0)) ~ "/" ~ (hs.fta|default(0))),
+        ("FG%",  "%.1f"|format((vs.fg_pct or 0) * 100),
+                 "%.1f"|format((hs.fg_pct or 0) * 100)),
+        ("3P%",  "%.1f"|format((vs.fg3_pct or 0) * 100),
+                 "%.1f"|format((hs.fg3_pct or 0) * 100)),
+        ("REB",  vs.reb|default("—"), hs.reb|default("—")),
+        ("AST",  vs.ast|default("—"), hs.ast|default("—")),
+        ("STL",  vs.stl|default("—"), hs.stl|default("—")),
+        ("BLK",  vs.blk|default("—"), hs.blk|default("—")),
+      ] %}
+      <div class="ts-label-col">
+        <div class="ts-team-hdr">{{ g.visitor_abbr }}</div>
+        {% for label, vval, hval in rows %}
+        <div class="ts-cell ts-vis">{{ vval }}</div>
+        {% endfor %}
+      </div>
+      <div class="ts-middle-col">
+        <div class="ts-team-hdr ts-mid-hdr">&nbsp;</div>
+        {% for label, vval, hval in rows %}
+        <div class="ts-cell ts-mid">{{ label }}</div>
+        {% endfor %}
+      </div>
+      <div class="ts-label-col ts-right-col">
+        <div class="ts-team-hdr ts-right-hdr">{{ g.home_abbr }}</div>
+        {% for label, vval, hval in rows %}
+        <div class="ts-cell ts-home">{{ hval }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% elif not vs and not hs %}
+    <p class="empty ts-missing">Box score not yet available — run ingest to fetch it.</p>
+    {% endif %}
+
+    {# ── Player box scores ─────────────────────────────────────────── #}
+    {% if detail.visitor_players or detail.home_players %}
+    <div class="gd-players">
+
+      {% for team_abbr, players in [
+          (g.visitor_abbr, detail.visitor_players),
+          (g.home_abbr,    detail.home_players),
+      ] %}
+      {% if players %}
+      <div class="player-section">
+        <h4 class="player-section-hdr">{{ team_abbr }}</h4>
+        <div class="table-wrap">
+          <table class="box-table">
+            <thead>
+              <tr>
+                <th class="col-name">Player</th>
+                <th class="col-pos" title="Position">Pos</th>
+                <th class="col-min" title="Minutes">Min</th>
+                <th class="col-num">PTS</th>
+                <th class="col-num">REB</th>
+                <th class="col-num">AST</th>
+                <th class="col-num">STL</th>
+                <th class="col-num">BLK</th>
+                <th class="col-num">TO</th>
+                <th class="col-shoot" title="Field goals made/attempted">FG</th>
+                <th class="col-shoot" title="Three-pointers made/attempted">3PT</th>
+                <th class="col-shoot" title="Free throws made/attempted">FT</th>
+                <th class="col-pm" title="Plus/Minus">+/-</th>
+              </tr>
+            </thead>
+            <tbody>
+              {# Starters first (start_position != ''), then bench #}
+              {% for p in players %}
+              {% set is_starter = p.start_position and p.start_position != '' %}
+              {% set min_str = p.minutes.split('.')[0] if p.minutes else '—' %}
+              {% set pm = p.plus_minus %}
+              <tr class="{{ 'starter' if is_starter else 'bench' }}">
+                <td class="col-name">
+                  {{ p.player_name }}
+                  {% if is_starter %}<span class="starter-dot" title="Starter"></span>{% endif %}
+                </td>
+                <td class="col-pos muted">{{ p.start_position or '—' }}</td>
+                <td class="col-min muted">{{ min_str }}</td>
+                <td class="col-num bold">{{ p.pts if p.pts is not none else '—' }}</td>
+                <td class="col-num">{{ p.reb if p.reb is not none else '—' }}</td>
+                <td class="col-num">{{ p.ast if p.ast is not none else '—' }}</td>
+                <td class="col-num">{{ p.stl if p.stl is not none else '—' }}</td>
+                <td class="col-num">{{ p.blk if p.blk is not none else '—' }}</td>
+                <td class="col-num">{{ p.turnovers if p.turnovers is not none else '—' }}</td>
+                <td class="col-shoot muted">
+                  {{ (p.fgm|default(0)) ~ "/" ~ (p.fga|default(0)) }}
+                </td>
+                <td class="col-shoot muted">
+                  {{ (p.fg3m|default(0)) ~ "/" ~ (p.fg3a|default(0)) }}
+                </td>
+                <td class="col-shoot muted">
+                  {{ (p.ftm|default(0)) ~ "/" ~ (p.fta|default(0)) }}
+                </td>
+                <td class="col-pm {{ 'pm-pos' if pm and pm > 0 else 'pm-neg' if pm and pm < 0 else '' }}">
+                  {% if pm is not none %}
+                    {{ ("+" ~ pm) if pm > 0 else pm }}
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+
+    </div>{# /.gd-players #}
+    {% endif %}
+
+  </article>
+  {% endfor %}
+
+</section>
+{% endblock %}

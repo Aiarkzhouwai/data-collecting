@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}NBA Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <span class="logo">🏀</span>
+      <h1>NBA Dashboard</h1>
+      <nav>
+        <a href="/"{% if request.url.path == "/" %} class="active"{% endif %}>Home</a>
+        <a href="/games/yesterday"{% if request.url.path == "/games/yesterday" %} class="active"{% endif %}>Yesterday</a>
+        <a href="/injuries/tomorrow"{% if request.url.path == "/injuries/tomorrow" %} class="active"{% endif %}>Injuries</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer>
+    {% if last_updated %}
+      <span>Last updated: {{ last_updated }}</span>
+    {% else %}
+      <span>No data yet — run <code>python scripts/ingest_all.py</code> or visit
+        <a href="/refresh">/refresh</a>.</span>
+    {% endif %}
+    <a href="/refresh" class="refresh-link">↻ Refresh now</a>
+  </footer>
+
+</body>
+</html>
