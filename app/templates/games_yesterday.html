@@ -19,7 +19,7 @@
 
   <article class="gd" id="game-{{ g.game_id }}">
 
-    {# ── Score header ──────────────────────────────────────────────── #}
+    {# ── Score header ─────────────────────────────────────────────── #}
     <div class="gd-header">
       <div class="gd-team {{ 'gd-winner' if visitor_won }}">
         <span class="gd-abbr">{{ g.visitor_abbr }}</span>
@@ -28,8 +28,15 @@
       </div>
 
       <div class="gd-sep">
-        <span class="gd-status">{{ g.status_text }}</span>
-        <span class="gd-at">FINAL</span>
+        {% if g.game_status_id == 2 %}
+          <span class="status-live gd-live-label">● LIVE</span>
+          <span class="gd-status">{{ g.status_text }}</span>
+        {% elif g.game_status_id == 3 %}
+          <span class="gd-at">FINAL</span>
+          <span class="gd-status">{{ g.status_text }}</span>
+        {% else %}
+          <span class="gd-status">{{ g.status_text }}</span>
+        {% endif %}
       </div>
 
       <div class="gd-team gd-team-right {{ 'gd-winner' if home_won }}">
@@ -42,7 +49,7 @@
     {# ── Team stat comparison ──────────────────────────────────────── #}
     {% if vs and hs %}
     <div class="gd-teamstats">
-      {% set rows = [
+      {% set stat_rows = [
         ("FG",   (vs.fgm|default(0)) ~ "/" ~ (vs.fga|default(0)),
                  (hs.fgm|default(0)) ~ "/" ~ (hs.fga|default(0))),
         ("3PT",  (vs.fg3m|default(0)) ~ "/" ~ (vs.fg3a|default(0)),
@@ -60,100 +67,121 @@
       ] %}
       <div class="ts-label-col">
         <div class="ts-team-hdr">{{ g.visitor_abbr }}</div>
-        {% for label, vval, hval in rows %}
+        {% for label, vval, hval in stat_rows %}
         <div class="ts-cell ts-vis">{{ vval }}</div>
         {% endfor %}
       </div>
       <div class="ts-middle-col">
         <div class="ts-team-hdr ts-mid-hdr">&nbsp;</div>
-        {% for label, vval, hval in rows %}
+        {% for label, vval, hval in stat_rows %}
         <div class="ts-cell ts-mid">{{ label }}</div>
         {% endfor %}
       </div>
       <div class="ts-label-col ts-right-col">
         <div class="ts-team-hdr ts-right-hdr">{{ g.home_abbr }}</div>
-        {% for label, vval, hval in rows %}
+        {% for label, vval, hval in stat_rows %}
         <div class="ts-cell ts-home">{{ hval }}</div>
         {% endfor %}
       </div>
     </div>
     {% elif not vs and not hs %}
-    <p class="empty ts-missing">Box score not yet available — run ingest to fetch it.</p>
+    <p class="empty ts-missing">
+      Box score not yet available.
+      {% if g.game_status_id == 2 %}Game is live — stats update after it ends.{% endif %}
+    </p>
     {% endif %}
 
-    {# ── Player box scores ─────────────────────────────────────────── #}
+    {# ── Player box scores ────────────────────────────────────────── #}
+    {% macro player_table(team_abbr, players) %}
+    {% if players %}
+    {% set starters = players | selectattr("start_position") | rejectattr("start_position", "equalto", "") | list %}
+    {% set bench    = players | selectattr("start_position", "equalto", "") | list %}
+    <div class="player-section">
+      <h4 class="player-section-hdr">{{ team_abbr }}</h4>
+      <div class="table-wrap">
+        <table class="box-table">
+          <thead>
+            <tr>
+              <th class="col-name">Player</th>
+              <th class="col-pos"  title="Position">Pos</th>
+              <th class="col-min"  title="Minutes played">Min</th>
+              <th class="col-num">PTS</th>
+              <th class="col-num">REB</th>
+              <th class="col-num">AST</th>
+              <th class="col-num">STL</th>
+              <th class="col-num">BLK</th>
+              <th class="col-num">TO</th>
+              <th class="col-shoot" title="FG made/attempted">FG</th>
+              <th class="col-shoot" title="3PT made/attempted">3PT</th>
+              <th class="col-shoot" title="FT made/attempted">FT</th>
+              <th class="col-pm"   title="Plus/Minus">+/-</th>
+            </tr>
+          </thead>
+          <tbody>
+
+            {# ── Starters ─────────────────────────────────────────── #}
+            {% if starters %}
+            <tr class="rotation-divider">
+              <td colspan="13">STARTERS</td>
+            </tr>
+            {% for p in starters %}
+            {{ player_row(p, true) }}
+            {% endfor %}
+            {% endif %}
+
+            {# ── Bench ────────────────────────────────────────────── #}
+            {% if bench %}
+            <tr class="rotation-divider bench-divider">
+              <td colspan="13">BENCH</td>
+            </tr>
+            {% for p in bench %}
+            {{ player_row(p, false) }}
+            {% endfor %}
+            {% endif %}
+
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+    {% endmacro %}
+
+    {% macro player_row(p, is_starter) %}
+    {% set min_str = p.minutes.split(':')[0] ~ ":" ~ p.minutes.split(':')[1] if p.minutes and ':' in p.minutes else (p.minutes.split('.')[0] if p.minutes else '—') %}
+    {% set pm = p.plus_minus %}
+    <tr class="{{ 'starter' if is_starter else 'bench' }}" data-player-id="{{ p.player_id }}">
+      <td class="col-name">
+        {% if p.player_id %}
+          <a class="player-link" href="/players/{{ p.player_id }}">{{ p.player_name or '—' }}</a>
+        {% else %}
+          {{ p.player_name or '—' }}
+        {% endif %}
+        {% if is_starter %}<span class="starter-dot" title="Starter">&#9679;</span>{% endif %}
+      </td>
+      <td class="col-pos muted">{{ p.start_position or '—' }}</td>
+      <td class="col-min muted">{{ min_str }}</td>
+      <td class="col-num bold">{{ p.pts if p.pts is not none else '—' }}</td>
+      <td class="col-num">{{ p.reb if p.reb is not none else '—' }}</td>
+      <td class="col-num">{{ p.ast if p.ast is not none else '—' }}</td>
+      <td class="col-num">{{ p.stl if p.stl is not none else '—' }}</td>
+      <td class="col-num">{{ p.blk if p.blk is not none else '—' }}</td>
+      <td class="col-num">{{ p.turnovers if p.turnovers is not none else '—' }}</td>
+      <td class="col-shoot muted">{{ (p.fgm|default(0)) ~ "/" ~ (p.fga|default(0)) }}</td>
+      <td class="col-shoot muted">{{ (p.fg3m|default(0)) ~ "/" ~ (p.fg3a|default(0)) }}</td>
+      <td class="col-shoot muted">{{ (p.ftm|default(0)) ~ "/" ~ (p.fta|default(0)) }}</td>
+      <td class="col-pm {{ 'pm-pos' if pm and pm > 0 else 'pm-neg' if pm and pm < 0 else '' }}">
+        {% if pm is not none %}{{ ("+" ~ pm|int) if pm > 0 else pm|int }}{% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endmacro %}
+
     {% if detail.visitor_players or detail.home_players %}
     <div class="gd-players">
-
-      {% for team_abbr, players in [
-          (g.visitor_abbr, detail.visitor_players),
-          (g.home_abbr,    detail.home_players),
-      ] %}
-      {% if players %}
-      <div class="player-section">
-        <h4 class="player-section-hdr">{{ team_abbr }}</h4>
-        <div class="table-wrap">
-          <table class="box-table">
-            <thead>
-              <tr>
-                <th class="col-name">Player</th>
-                <th class="col-pos" title="Position">Pos</th>
-                <th class="col-min" title="Minutes">Min</th>
-                <th class="col-num">PTS</th>
-                <th class="col-num">REB</th>
-                <th class="col-num">AST</th>
-                <th class="col-num">STL</th>
-                <th class="col-num">BLK</th>
-                <th class="col-num">TO</th>
-                <th class="col-shoot" title="Field goals made/attempted">FG</th>
-                <th class="col-shoot" title="Three-pointers made/attempted">3PT</th>
-                <th class="col-shoot" title="Free throws made/attempted">FT</th>
-                <th class="col-pm" title="Plus/Minus">+/-</th>
-              </tr>
-            </thead>
-            <tbody>
-              {# Starters first (start_position != ''), then bench #}
-              {% for p in players %}
-              {% set is_starter = p.start_position and p.start_position != '' %}
-              {% set min_str = p.minutes.split('.')[0] if p.minutes else '—' %}
-              {% set pm = p.plus_minus %}
-              <tr class="{{ 'starter' if is_starter else 'bench' }}">
-                <td class="col-name">
-                  {{ p.player_name }}
-                  {% if is_starter %}<span class="starter-dot" title="Starter"></span>{% endif %}
-                </td>
-                <td class="col-pos muted">{{ p.start_position or '—' }}</td>
-                <td class="col-min muted">{{ min_str }}</td>
-                <td class="col-num bold">{{ p.pts if p.pts is not none else '—' }}</td>
-                <td class="col-num">{{ p.reb if p.reb is not none else '—' }}</td>
-                <td class="col-num">{{ p.ast if p.ast is not none else '—' }}</td>
-                <td class="col-num">{{ p.stl if p.stl is not none else '—' }}</td>
-                <td class="col-num">{{ p.blk if p.blk is not none else '—' }}</td>
-                <td class="col-num">{{ p.turnovers if p.turnovers is not none else '—' }}</td>
-                <td class="col-shoot muted">
-                  {{ (p.fgm|default(0)) ~ "/" ~ (p.fga|default(0)) }}
-                </td>
-                <td class="col-shoot muted">
-                  {{ (p.fg3m|default(0)) ~ "/" ~ (p.fg3a|default(0)) }}
-                </td>
-                <td class="col-shoot muted">
-                  {{ (p.ftm|default(0)) ~ "/" ~ (p.fta|default(0)) }}
-                </td>
-                <td class="col-pm {{ 'pm-pos' if pm and pm > 0 else 'pm-neg' if pm and pm < 0 else '' }}">
-                  {% if pm is not none %}
-                    {{ ("+" ~ pm) if pm > 0 else pm }}
-                  {% else %}—{% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {% endif %}
-      {% endfor %}
-
-    </div>{# /.gd-players #}
+      {{ player_table(g.visitor_abbr, detail.visitor_players) }}
+      {{ player_table(g.home_abbr,    detail.home_players) }}
+    </div>
+    {% elif vs or hs %}
+    <p class="empty ts-missing">Player stats not yet loaded for this game.</p>
     {% endif %}
 
   </article>

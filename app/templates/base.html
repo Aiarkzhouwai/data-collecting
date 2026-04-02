@@ -17,6 +17,15 @@
         <a href="/games/yesterday"{% if request.url.path == "/games/yesterday" %} class="active"{% endif %}>Yesterday</a>
         <a href="/injuries/tomorrow"{% if request.url.path == "/injuries/tomorrow" %} class="active"{% endif %}>Injuries</a>
       </nav>
+      <div class="clocks" id="clocks">
+        <span class="clock-item"><span class="clock-tz">ET</span> <span class="clock-time" id="clock-et">--:-- --</span></span>
+        <span class="clock-sep">·</span>
+        <span class="clock-item"><span class="clock-tz">CT</span> <span class="clock-time" id="clock-ct">--:-- --</span></span>
+        <span class="clock-sep">·</span>
+        <span class="clock-item"><span class="clock-tz">PT</span> <span class="clock-time" id="clock-pt">--:-- --</span></span>
+        <span class="clock-sep">·</span>
+        <span class="clock-item"><span class="clock-tz">CST</span> <span class="clock-time" id="clock-cst">--:-- --</span></span>
+      </div>
     </div>
   </header>
 
@@ -33,6 +42,31 @@
     {% endif %}
     <a href="/refresh" class="refresh-link">↻ Refresh now</a>
   </footer>
+
+  {% block scripts %}{% endblock %}
+
+  <script>
+    (function () {
+      var zones = {
+        et:  'America/New_York',
+        ct:  'America/Chicago',
+        pt:  'America/Los_Angeles',
+        cst: 'Asia/Shanghai',
+      };
+      var fmt = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+
+      function tick() {
+        var now = new Date();
+        for (var id in zones) {
+          var el = document.getElementById('clock-' + id);
+          if (el) el.textContent = now.toLocaleTimeString('en-US', Object.assign({ timeZone: zones[id] }, fmt));
+        }
+      }
+
+      tick();
+      setInterval(tick, 1000);
+    })();
+  </script>
 
 </body>
 </html>

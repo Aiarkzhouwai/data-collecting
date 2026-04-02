@@ -3,6 +3,20 @@
 
 {% block content %}
 
+{# ── Macro: one injury row — defined first so it's in scope ───────── #}
+{% macro _render_injury(inj) %}
+{% set slug = (inj.player_status or '') | lower | replace(' ', '-') %}
+<div class="ir-row ir-{{ slug }}">
+  <div class="ir-top">
+    <a class="player-link ir-name" href="/players/search?q={{ inj.player_first }}+{{ inj.player_last }}">{{ inj.player_first }} {{ inj.player_last }}</a>
+    <span class="badge badge-{{ slug }}">{{ inj.player_status or '?' }}</span>
+  </div>
+  {% if inj.player_comment %}
+  <div class="ir-comment">{{ inj.player_comment }}</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
 {# ── Page header ──────────────────────────────────────────────────── #}
 <section>
   <h2>
@@ -13,18 +27,18 @@
   {# Report timestamp banner #}
   <div class="report-meta">
     {% if report_date and report_time %}
-      <span class="report-badge">Official NBA Report</span>
-      Issued <strong>{{ report_time }}</strong> on {{ report_date }}
+      <span class="report-badge">ESPN Injury Report</span>
+      As of <strong>{{ report_time }}</strong> on {{ report_date }}
     {% elif report_date %}
-      <span class="report-badge">Official NBA Report</span>
-      Issued {{ report_date }}
+      <span class="report-badge">ESPN Injury Report</span>
+      As of {{ report_date }}
     {% else %}
       <span class="report-badge report-badge-warn">No report data</span>
       Run <code>python scripts/ingest_all.py</code> to fetch the latest report.
     {% endif %}
   </div>
 
-  {# ── No games at all ──────────────────────────────────────────────── #}
+  {# ── No data at all ─────────────────────────────────────────────── #}
   {% if not matchups and not unmatched %}
   <p class="empty">
     No injury data found for {{ tomorrow }}.
@@ -36,7 +50,7 @@
   </p>
   {% endif %}
 
-  {# ── One card per matchup ─────────────────────────────────────────── #}
+  {# ── One card per matchup ────────────────────────────────────────── #}
   {% for m in matchups %}
   {% set g = m.game %}
   <article class="im-card">
@@ -88,7 +102,7 @@
   </article>
   {% endfor %}
 
-  {# ── Injuries not matched to a game ──────────────────────────────── #}
+  {# ── Injuries not matched to a game ───────────────────────────────── #}
   {% if unmatched %}
   <article class="im-card im-card-orphan">
     <div class="im-header">
@@ -108,19 +122,5 @@
   {% endif %}
 
 </section>
-
-{# ── Macro: one injury row ────────────────────────────────────────── #}
-{% macro _render_injury(inj) %}
-{% set slug = (inj.player_status or '') | lower | replace(' ', '-') %}
-<div class="ir-row ir-{{ slug }}">
-  <div class="ir-top">
-    <span class="ir-name">{{ inj.player_first }} {{ inj.player_last }}</span>
-    <span class="badge badge-{{ slug }}">{{ inj.player_status or '?' }}</span>
-  </div>
-  {% if inj.player_comment %}
-  <div class="ir-comment">{{ inj.player_comment }}</div>
-  {% endif %}
-</div>
-{% endmacro %}
 
 {% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Not Found — NBA Dashboard{% endblock %}
+
+{% block content %}
+<section style="text-align:center; padding: 4rem 1rem;">
+  <div style="font-size:3rem; margin-bottom:1rem;">🏀</div>
+  <h2 style="font-size:1.5rem; margin-bottom:0.5rem;">Game not found</h2>
+  <p class="empty">No game with ID <code>{{ game_id }}</code> exists in the database.</p>
+  <p style="margin-top:1.5rem;">
+    <a href="/" style="color:var(--blue); font-weight:600;">← Back to dashboard</a>
+  </p>
+</section>
+{% endblock %}

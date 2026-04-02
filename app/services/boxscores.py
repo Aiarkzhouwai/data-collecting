@@ -2,13 +2,16 @@
 Fetch post-game box scores from nba_api and store them in
 team_boxscores and player_boxscores.
 
+Uses BoxScoreTraditionalV3 (camelCase field names) which works for the
+2025-26 season. BoxScoreTraditionalV2 returns no data for current-season games.
+
 Call fetch_and_store_boxscore(game_id) once per completed game.
 It is safe to call it multiple times — rows are upserted, not duplicated.
 """
 
 import time
 
-from nba_api.stats.endpoints import boxscoretraditionalv2
+from nba_api.stats.endpoints import boxscoretraditionalv3
 
 from app.db import get_db
 from app.logger import logger
@@ -28,8 +31,8 @@ def fetch_and_store_boxscore(game_id: str) -> bool:
     logger.info("  Fetching box score: game %s", game_id)
 
     try:
-        box = boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id, timeout=30)
-        time.sleep(0.6)  # stay within nba_api rate limit
+        box = boxscoretraditionalv3.BoxScoreTraditionalV3(game_id=game_id, timeout=30)
+        time.sleep(0.6)
         team_rows   = _to_rows(box.team_stats)
         player_rows = _to_rows(box.player_stats)
     except Exception as exc:
@@ -57,35 +60,44 @@ def fetch_and_store_boxscore(game_id: str) -> bool:
                      updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(game_id, team_id) DO UPDATE SET
-                    pts      = excluded.pts,
-                    reb      = excluded.reb,
-                    ast      = excluded.ast,
-                    stl      = excluded.stl,
-                    blk      = excluded.blk,
-                    fgm      = excluded.fgm,
-                    fga      = excluded.fga,
-                    fg_pct   = excluded.fg_pct,
-                    fg3m     = excluded.fg3m,
-                    fg3a     = excluded.fg3a,
-                    fg3_pct  = excluded.fg3_pct,
-                    ftm      = excluded.ftm,
-                    fta      = excluded.fta,
-                    ft_pct   = excluded.ft_pct,
+                    pts        = excluded.pts,
+                    reb        = excluded.reb,
+                    ast        = excluded.ast,
+                    stl        = excluded.stl,
+                    blk        = excluded.blk,
+                    fgm        = excluded.fgm,
+                    fga        = excluded.fga,
+                    fg_pct     = excluded.fg_pct,
+                    fg3m       = excluded.fg3m,
+                    fg3a       = excluded.fg3a,
+                    fg3_pct    = excluded.fg3_pct,
+                    ftm        = excluded.ftm,
+                    fta        = excluded.fta,
+                    ft_pct     = excluded.ft_pct,
                     updated_at = excluded.updated_at
                 """,
                 (
-                    row["GAME_ID"], row["TEAM_ID"], row["TEAM_ABBREVIATION"],
-                    row.get("PTS"), row.get("REB"), row.get("AST"),
-                    row.get("STL"), row.get("BLK"),
-                    row.get("FGM"), row.get("FGA"), row.get("FG_PCT"),
-                    row.get("FG3M"), row.get("FG3A"), row.get("FG3_PCT"),
-                    row.get("FTM"), row.get("FTA"), row.get("FT_PCT"),
+                    row["gameId"], row["teamId"], row["teamTricode"],
+                    row.get("points"),
+                    row.get("reboundsTotal"),
+                    row.get("assists"),
+                    row.get("steals"),
+                    row.get("blocks"),
+                    row.get("fieldGoalsMade"),
+                    row.get("fieldGoalsAttempted"),
+                    row.get("fieldGoalsPercentage"),
+                    row.get("threePointersMade"),
+                    row.get("threePointersAttempted"),
+                    row.get("threePointersPercentage"),
+                    row.get("freeThrowsMade"),
+                    row.get("freeThrowsAttempted"),
+                    row.get("freeThrowsPercentage"),
                 ),
             )
             team_stored += 1
         except Exception as exc:
             logger.warning("  Could not store team row for %s / %s: %s",
-                           game_id, row.get("TEAM_ABBREVIATION"), exc)
+                           game_id, row.get("teamTricode"), exc)
 
     # ── Player box scores ─────────────────────────────────────────────────────
     for row in player_rows:
@@ -101,6 +113,9 @@ def fetch_and_store_boxscore(game_id: str) -> bool:
                      plus_minus, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(game_id, player_id) DO UPDATE SET
+                    player_name = excluded.player_name,
+                    start_position = excluded.start_position,
+                    minutes    = excluded.minutes,
                     pts        = excluded.pts,
                     reb        = excluded.reb,
                     ast        = excluded.ast,
@@ -120,32 +135,46 @@ def fetch_and_store_boxscore(game_id: str) -> bool:
                     updated_at = excluded.updated_at
                 """,
                 (
-                    row["GAME_ID"], row["TEAM_ID"], row["PLAYER_ID"],
-                    row.get("PLAYER_NAME"), row.get("START_POSITION"), row.get("MIN"),
-                    row.get("PTS"), row.get("REB"), row.get("AST"),
-                    row.get("STL"), row.get("BLK"), row.get("TO"),
-                    row.get("FGM"), row.get("FGA"), row.get("FG_PCT"),
-                    row.get("FG3M"), row.get("FG3A"), row.get("FG3_PCT"),
-                    row.get("FTM"), row.get("FTA"), row.get("FT_PCT"),
-                    row.get("PLUS_MINUS"),
+                    row["gameId"], row["teamId"], row["personId"],
+                    f"{row.get('firstName','')} {row.get('familyName','')}".strip(),
+                    row.get("position"), row.get("minutes"),
+                    row.get("points"),
+                    row.get("reboundsTotal"),
+                    row.get("assists"),
+                    row.get("steals"),
+                    row.get("blocks"),
+                    row.get("turnovers"),
+                    row.get("fieldGoalsMade"),
+                    row.get("fieldGoalsAttempted"),
+                    row.get("fieldGoalsPercentage"),
+                    row.get("threePointersMade"),
+                    row.get("threePointersAttempted"),
+                    row.get("threePointersPercentage"),
+                    row.get("freeThrowsMade"),
+                    row.get("freeThrowsAttempted"),
+                    row.get("freeThrowsPercentage"),
+                    row.get("plusMinusPoints"),
                 ),
             )
             player_stored += 1
         except Exception as exc:
             logger.warning("  Could not store player row %s / %s: %s",
-                           game_id, row.get("PLAYER_NAME"), exc)
+                           game_id, row.get("name"), exc)
 
     conn.commit()
     conn.close()
 
-    # Log a quick summary: team names + top scorer
-    team_names = " vs ".join(r.get("TEAM_ABBREVIATION", "?") for r in team_rows)
+    team_names = " vs ".join(r.get("teamTricode", "?") for r in team_rows)
     top = max(
-        (r for r in player_rows if r.get("PTS") is not None),
-        key=lambda r: r.get("PTS", 0),
+        (r for r in player_rows if r.get("points") is not None),
+        key=lambda r: r.get("points", 0),
         default=None,
     )
-    top_str = f" | top scorer: {top['PLAYER_NAME']} {top['PTS']}pts" if top else ""
+    if top:
+        top_name = f"{top.get('firstName','')} {top.get('familyName','')}".strip()
+        top_str  = f" | top scorer: {top_name} {top['points']}pts"
+    else:
+        top_str = ""
     logger.info(
         "  Stored %s — %d teams, %d players%s",
         team_names, team_stored, player_stored, top_str,

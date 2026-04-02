@@ -2,97 +2,140 @@
 
 {% block content %}
 
-{# ── Yesterday's Games ───────────────────────────────────────────── #}
+{# ── Shared macro: render one game card ───────────────────────────── #}
+{% macro game_card(g, link, show_scores) %}
+  {% if g.game_status_id == 3 %}
+    {% set card_cls = "final" %}
+  {% elif g.game_status_id == 2 %}
+    {% set card_cls = "live" %}
+  {% else %}
+    {% set card_cls = "scheduled" %}
+  {% endif %}
+
+  <a class="game-card {{ card_cls }}" href="{{ link }}"
+     {% if g.game_status_id == 2 %}data-live-game="{{ g.game_id }}"{% endif %}>
+    <div class="logo-row">
+      <img class="team-logo" src="{{ g.visitor_logo }}" alt="{{ g.visitor_abbr }}" onerror="this.style.display='none'">
+      <img class="team-logo" src="{{ g.home_logo }}"    alt="{{ g.home_abbr }}"    onerror="this.style.display='none'">
+    </div>
+    <div class="matchup">
+
+      {# Visitor #}
+      <div class="team{% if show_scores and g.visitor_pts is not none and g.home_pts is not none and g.visitor_pts > g.home_pts %} winner{% endif %}">
+        <span class="abbr">{{ g.visitor_abbr }}</span>
+        {% if show_scores %}
+          <span class="pts">{{ g.visitor_pts if g.visitor_pts is not none else '—' }}</span>
+          {% if g.visitor_reb is not none or g.visitor_ast is not none %}
+          <span class="mini-stats">{{ g.visitor_reb or '—' }}R · {{ g.visitor_ast or '—' }}A</span>
+          {% endif %}
+        {% else %}
+          <span class="team-name">{{ g.visitor_name }}</span>
+        {% endif %}
+      </div>
+
+      <span class="at">@</span>
+
+      {# Home #}
+      <div class="team{% if show_scores and g.home_pts is not none and g.visitor_pts is not none and g.home_pts > g.visitor_pts %} winner{% endif %}">
+        <span class="abbr">{{ g.home_abbr }}</span>
+        {% if show_scores %}
+          <span class="pts">{{ g.home_pts if g.home_pts is not none else '—' }}</span>
+          {% if g.home_reb is not none or g.home_ast is not none %}
+          <span class="mini-stats">{{ g.home_reb or '—' }}R · {{ g.home_ast or '—' }}A</span>
+          {% endif %}
+        {% else %}
+          <span class="team-name">{{ g.home_name }}</span>
+        {% endif %}
+      </div>
+
+    </div>
+    <div class="card-footer">
+      {% if g.game_status_id == 2 %}
+        <span class="status-live">● LIVE · {{ g.status_text }}</span>
+      {% elif g.game_status_id == 3 %}
+        <span class="status">Final</span>
+      {% else %}
+        <span class="status">{{ g.status_text }}</span>
+      {% endif %}
+      <span class="box-link">
+        {%- if g.game_status_id == 1 -%}Injuries →
+        {%- elif g.game_status_id == 2 -%}Live →
+        {%- else -%}Box scores →
+        {%- endif -%}
+      </span>
+    </div>
+  </a>
+{% endmacro %}
+
+
+{# ── Yesterday's Results ──────────────────────────────────────────── #}
 <section>
   <h2>Yesterday's Results <span class="date-label">{{ yesterday }}</span></h2>
 
   {% if yesterday_games %}
   <div class="games-grid">
     {% for g in yesterday_games %}
-    <a class="game-card final" href="/games/yesterday#game-{{ g.game_id }}">
-      <div class="logo-row">
-        <img class="team-logo" src="{{ g.visitor_logo }}" alt="{{ g.visitor_abbr }}" onerror="this.style.display='none'">
-        <img class="team-logo" src="{{ g.home_logo }}" alt="{{ g.home_abbr }}" onerror="this.style.display='none'">
-      </div>
-      <div class="matchup">
-
-        {# Visitor #}
-        <div class="team
-          {% if g.visitor_pts is not none and g.home_pts is not none
-             and g.visitor_pts > g.home_pts %}winner{% endif %}">
-          <span class="abbr">{{ g.visitor_abbr }}</span>
-          <span class="pts">{{ g.visitor_pts if g.visitor_pts is not none else '—' }}</span>
-          {% if g.visitor_reb is not none or g.visitor_ast is not none %}
-          <span class="mini-stats">{{ g.visitor_reb or '—' }}R · {{ g.visitor_ast or '—' }}A</span>
-          {% endif %}
-        </div>
-
-        <span class="at">@</span>
-
-        {# Home #}
-        <div class="team
-          {% if g.home_pts is not none and g.visitor_pts is not none
-             and g.home_pts > g.visitor_pts %}winner{% endif %}">
-          <span class="abbr">{{ g.home_abbr }}</span>
-          <span class="pts">{{ g.home_pts if g.home_pts is not none else '—' }}</span>
-          {% if g.home_reb is not none or g.home_ast is not none %}
-          <span class="mini-stats">{{ g.home_reb or '—' }}R · {{ g.home_ast or '—' }}A</span>
-          {% endif %}
-        </div>
-
-      </div>
-      <div class="card-footer">
-        <span class="status">{{ g.status_text }}</span>
-        <span class="box-link">Box scores →</span>
-      </div>
-    </a>
+      {{ game_card(g, "/games/" ~ g.game_id, true) }}
     {% endfor %}
   </div>
-
   {% else %}
   <p class="empty">No games found for {{ yesterday }}.</p>
   {% endif %}
 </section>
 
-{# ── Tomorrow's Schedule ─────────────────────────────────────────── #}
+
+{# ── Today's Games ────────────────────────────────────────────────── #}
+<section>
+  {% set live_count  = today_games | selectattr("game_status_id", "equalto", 2) | list | length %}
+  {% set final_count = today_games | selectattr("game_status_id", "equalto", 3) | list | length %}
+
+  <h2>
+    Today's Games
+    <span class="date-label">{{ today }}</span>
+    {% if live_count > 0 %}
+      <span class="live-badge">{{ live_count }} LIVE</span>
+    {% endif %}
+  </h2>
+
+  {% if today_games %}
+  <div class="games-grid">
+    {% for g in today_games %}
+      {# link to per-game detail for live/final, injuries for pre-game #}
+      {% if g.game_status_id == 1 %}
+        {% set link = "/injuries/tomorrow" %}
+      {% else %}
+        {% set link = "/games/" ~ g.game_id %}
+      {% endif %}
+      {{ game_card(g, link, g.game_status_id >= 2) }}
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">No games scheduled for today ({{ today }} ET).</p>
+  {% endif %}
+</section>
+
+
+{# ── Tomorrow's Schedule ──────────────────────────────────────────── #}
 <section>
   <h2>Tomorrow's Schedule <span class="date-label">{{ tomorrow }}</span></h2>
 
   {% if tomorrow_games %}
   <div class="games-grid">
     {% for g in tomorrow_games %}
-    <a class="game-card scheduled" href="/injuries/tomorrow">
-      <div class="logo-row">
-        <img class="team-logo" src="{{ g.visitor_logo }}" alt="{{ g.visitor_abbr }}" onerror="this.style.display='none'">
-        <img class="team-logo" src="{{ g.home_logo }}" alt="{{ g.home_abbr }}" onerror="this.style.display='none'">
-      </div>
-      <div class="matchup">
-        <div class="team">
-          <span class="abbr">{{ g.visitor_abbr }}</span>
-          <span class="team-name">{{ g.visitor_name }}</span>
-        </div>
-        <span class="at">@</span>
-        <div class="team">
-          <span class="abbr">{{ g.home_abbr }}</span>
-          <span class="team-name">{{ g.home_name }}</span>
-        </div>
-      </div>
-      <div class="card-footer">
-        <span class="status">{{ g.status_text }}</span>
-        <span class="box-link">Injuries →</span>
-      </div>
-    </a>
+      {{ game_card(g, "/injuries/tomorrow", false) }}
     {% endfor %}
   </div>
-
   {% else %}
   <p class="empty">No games scheduled for {{ tomorrow }}.</p>
   {% endif %}
 </section>
 
-{# ── Injury Report ───────────────────────────────────────────────── #}
+
+{# ── Injury Report ────────────────────────────────────────────────── #}
 <section>
-  <h2>Injury Report <span class="date-label">latest</span> <a href="/injuries/tomorrow" class="section-link">Full report →</a></h2>
+  <h2>Injury Report <span class="date-label">latest</span>
+    <a href="/injuries/tomorrow" class="section-link">Full report →</a>
+  </h2>
 
   {% if injuries %}
   <div class="table-wrap">
@@ -109,7 +152,7 @@
         {% for inj in injuries %}
         <tr class="row-{{ inj.player_status | lower | replace(' ', '-') if inj.player_status else 'unknown' }}">
           <td><span class="abbr-sm">{{ inj.team_abbr }}</span></td>
-          <td>{{ inj.player_first }} {{ inj.player_last }}</td>
+          <td><a class="player-link" href="/players/search?q={{ inj.player_first }}+{{ inj.player_last }}">{{ inj.player_first }} {{ inj.player_last }}</a></td>
           <td>
             <span class="badge badge-{{ inj.player_status | lower | replace(' ', '-') if inj.player_status else 'unknown' }}">
               {{ inj.player_status }}
@@ -121,10 +164,123 @@
       </tbody>
     </table>
   </div>
-
   {% else %}
-  <p class="empty">No injury data available.</p>
+  <p class="empty">No injury data available. Run <code>python scripts/ingest_all.py</code> to fetch.</p>
   {% endif %}
 </section>
+
+{% block scripts %}
+{# ── Live game polling ─────────────────────────────────────────────── #}
+{% set live_count = (today_games + yesterday_games) | selectattr("game_status_id","equalto",2) | list | length %}
+{% if live_count > 0 %}
+<script>
+(function () {
+  var POLL_MS = 20000; // 20 s
+
+  console.log('[NBA Live] Polling started — interval', POLL_MS, 'ms,', {{ live_count }}, 'live game(s)');
+
+  function flashCard(card) {
+    card.style.transition = 'opacity 0.15s';
+    card.style.opacity = '0.6';
+    setTimeout(function() { card.style.opacity = ''; }, 200);
+  }
+
+  function updateLiveScores() {
+    var t0 = Date.now();
+    fetch('/api/live')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        var elapsed = Date.now() - t0;
+        console.log('[NBA Live] /api/live →', data.count, 'live game(s) | db_refresh:', data.last_live_refresh, '| round-trip:', elapsed + 'ms');
+
+        var liveIds = new Set(data.live_games.map(function(g) { return g.game_id; }));
+
+        data.live_games.forEach(function(g) {
+          var card = document.querySelector('[data-live-game="' + g.game_id + '"]');
+          if (!card) {
+            console.warn('[NBA Live] No card found for game_id', g.game_id);
+            return;
+          }
+
+          var changed = false;
+
+          // Update scores
+          var pts = card.querySelectorAll('.pts');
+          if (pts.length >= 2) {
+            if (g.visitor_pts !== null && pts[0].textContent !== String(g.visitor_pts)) {
+              console.debug('[NBA Live]', g.game_id, '— visitor score:', pts[0].textContent, '→', g.visitor_pts);
+              pts[0].textContent = g.visitor_pts;
+              changed = true;
+            }
+            if (g.home_pts !== null && pts[1].textContent !== String(g.home_pts)) {
+              console.debug('[NBA Live]', g.game_id, '— home score:', pts[1].textContent, '→', g.home_pts);
+              pts[1].textContent = g.home_pts;
+              changed = true;
+            }
+          }
+
+          // Update mini-stats (REB · AST)
+          var miniStats = card.querySelectorAll('.mini-stats');
+          if (miniStats.length >= 1 && g.visitor_reb !== null) {
+            var visLine = (g.visitor_reb || '—') + 'R · ' + (g.visitor_ast || '—') + 'A';
+            if (miniStats[0].textContent !== visLine) { miniStats[0].textContent = visLine; changed = true; }
+          }
+          if (miniStats.length >= 2 && g.home_reb !== null) {
+            var homeLine = (g.home_reb || '—') + 'R · ' + (g.home_ast || '—') + 'A';
+            if (miniStats[1].textContent !== homeLine) { miniStats[1].textContent = homeLine; changed = true; }
+          }
+
+          // Update winner highlight classes
+          var teams = card.querySelectorAll('.team');
+          if (teams.length >= 2 && g.visitor_pts !== null && g.home_pts !== null) {
+            if (g.visitor_pts > g.home_pts) {
+              teams[0].classList.add('winner'); teams[1].classList.remove('winner');
+            } else if (g.home_pts > g.visitor_pts) {
+              teams[1].classList.add('winner'); teams[0].classList.remove('winner');
+            } else {
+              teams[0].classList.remove('winner'); teams[1].classList.remove('winner');
+            }
+          }
+
+          // Update live status text
+          var statusEl = card.querySelector('.status-live');
+          var wantStatus = '● LIVE · ' + g.status_text;
+          if (statusEl && statusEl.textContent !== wantStatus) {
+            statusEl.textContent = wantStatus;
+            changed = true;
+          }
+
+          if (changed) flashCard(card);
+        });
+
+        // Games that moved from live → final
+        document.querySelectorAll('[data-live-game]').forEach(function(card) {
+          var id = card.getAttribute('data-live-game');
+          if (!liveIds.has(id)) {
+            console.log('[NBA Live] Game', id, 'finished — reloading page');
+            window.location.reload();
+          }
+        });
+
+        if (data.count === 0) {
+          console.log('[NBA Live] No live games remaining — stopping poller');
+          clearInterval(_interval);
+        }
+      })
+      .catch(function(err) {
+        console.error('[NBA Live] /api/live fetch failed:', err);
+      });
+  }
+
+  // Poll immediately, then on interval
+  updateLiveScores();
+  var _interval = setInterval(updateLiveScores, POLL_MS);
+})();
+</script>
+{% endif %}
+{% endblock %}
 
 {% endblock %}

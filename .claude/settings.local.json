@@ -9,7 +9,24 @@
       "Bash(pip list:*)",
       "Bash(python3 -m pip list)",
       "Bash(xargs -I{} basename {})",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''app/main.py''\\).read\\(\\)\\); print\\(''syntax OK''\\)\")"
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''app/main.py''\\).read\\(\\)\\); print\\(''syntax OK''\\)\")",
+      "Bash(sqlite3:*)",
+      "Bash(python3 -c \"from datetime import date, timedelta; yesterday = date.today\\(\\) - timedelta\\(days=1\\); tomorrow = date.today\\(\\) + timedelta\\(days=1\\); print\\(f''Today: {date.today\\(\\)}''\\); print\\(f''Yesterday: {yesterday}''\\); print\\(f''Tomorrow: {tomorrow}''\\)\")",
+      "Bash(python scripts/ingest_all.py)",
+      "Bash(python3 scripts/ingest_all.py)",
+      "Bash(python3 -c \"import nba_api\")",
+      "Bash(.venv/bin/python scripts/ingest_all.py)",
+      "Bash(.venv/bin/python -c \":*)",
+      "Bash(curl:*)",
+      "Bash(.venv/bin/pip show:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(.venv/bin/python -c \"import sys; sys.path.insert\\(0,''.''\\); from app.db import get_db; conn = get_db\\(\\); print\\(''team_boxscores cols:'', [d[1] for d in conn.execute\\(''PRAGMA table_info\\(team_boxscores\\)''\\).fetchall\\(\\)]\\); print\\(''player_boxscores cols:'', [d[1] for d in conn.execute\\(''PRAGMA table_info\\(player_boxscores\\)''\\).fetchall\\(\\)]\\); print\\(''games cols:'', [d[1] for d in conn.execute\\(''PRAGMA table_info\\(games\\)''\\).fetchall\\(\\)]\\); rows = conn.execute\\(''SELECT COUNT\\(*\\) FROM player_boxscores''\\).fetchone\\(\\)[0]; print\\(''player_boxscores rows:'', rows\\); sample = conn.execute\\(''SELECT * FROM player_boxscores LIMIT 2''\\).fetchall\\(\\); print\\(''sample player rows:'', [dict\\(r\\) for r in sample]\\)\")",
+      "Bash(grep -n \"player_name\\\\|player_first\\\\|player_last\\\\|contributor-name\\\\|ir-name\\\\|abbr-sm\" app/templates/*.html)",
+      "Bash(.venv/bin/python -c \"from app.services.trailing_stats import fetch_and_store_stints, get_stints; print\\(''OK''\\)\")",
+      "Bash(.venv/bin/python -c \"import ast; ast.parse\\(open\\(''app/services/trailing_stats.py''\\).read\\(\\)\\); print\\(''syntax OK''\\)\")",
+      "Bash(.venv/bin/python -c \"import ast; ast.parse\\(open\\(''app/main.py''\\).read\\(\\)\\); ast.parse\\(open\\(''app/db.py''\\).read\\(\\)\\); ast.parse\\(open\\(''app/tasks/scheduler.py''\\).read\\(\\)\\); print\\(''all syntax OK''\\)\")",
+      "Bash(python3:*)",
+      "Bash(.venv/bin/python -c \"import ast; ast.parse\\(open\\(''app/services/trailing_stats.py''\\).read\\(\\)\\); print\\(''OK''\\)\")"
     ]
   }
 }

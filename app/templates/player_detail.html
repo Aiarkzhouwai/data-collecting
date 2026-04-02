@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}{{ player_name }} — NBA Dashboard{% endblock %}
+
+{% block content %}
+
+{# ══════════════════════════════════════════════════════════════════════
+   PLAYER HEADER
+   ══════════════════════════════════════════════════════════════════════ #}
+<section class="gd-section">
+  <div class="pd-hero">
+
+    {# Headshot #}
+    <div class="pd-headshot-wrap">
+      {% if profile and profile.bio.headshot %}
+        <img class="pd-headshot"
+             src="{{ profile.bio.headshot }}"
+             alt="{{ player_name }}"
+             onerror="this.style.display='none'">
+      {% else %}
+        <div class="pd-headshot-placeholder">
+          <span style="font-size:3rem;">🏀</span>
+        </div>
+      {% endif %}
+    </div>
+
+    {# Identity #}
+    <div class="pd-identity">
+      <div class="pd-name">{{ player_name }}</div>
+
+      {% if profile %}
+        {% set bio = profile.bio %}
+        <div class="pd-meta-row">
+          {% if bio.jersey and bio.jersey != '—' %}
+            <span class="pd-jersey">#{{ bio.jersey }}</span>
+          {% endif %}
+          {% if bio.position and bio.position != '—' %}
+            <span class="pd-pos">{{ bio.position }}</span>
+          {% endif %}
+          {% if bio.team and bio.team != '—' %}
+            <span class="pd-team">{{ bio.team }}</span>
+            {% if bio.team_abbr and bio.team_abbr != '—' %}
+              <span class="muted">({{ bio.team_abbr }})</span>
+            {% endif %}
+          {% endif %}
+        </div>
+
+        <div class="pd-bio-pills">
+          {% if bio.height and bio.height != '—' %}
+            <span class="pd-pill"><span class="pd-pill-label">HT</span>{{ bio.height }}</span>
+          {% endif %}
+          {% if bio.weight and bio.weight != '—' %}
+            <span class="pd-pill"><span class="pd-pill-label">WT</span>{{ bio.weight }}</span>
+          {% endif %}
+          {% if bio.age and bio.age != '—' %}
+            <span class="pd-pill"><span class="pd-pill-label">AGE</span>{{ bio.age }}</span>
+          {% endif %}
+          {% if bio.experience and bio.experience != '—' %}
+            <span class="pd-pill"><span class="pd-pill-label">EXP</span>{{ bio.experience }}</span>
+          {% endif %}
+          {% if bio.college and bio.college != '—' %}
+            <span class="pd-pill"><span class="pd-pill-label">COLLEGE</span>{{ bio.college }}</span>
+          {% endif %}
+          {% if bio.draft and bio.draft != '—' %}
+            <span class="pd-pill"><span class="pd-pill-label">DRAFT</span>{{ bio.draft }}</span>
+          {% endif %}
+          {% if bio.country and bio.country != '—' %}
+            <span class="pd-pill"><span class="pd-pill-label">FROM</span>{{ bio.country }}</span>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="pd-links">
+        {% if profile %}
+          <a class="pd-ext-link" href="{{ profile.espn_url }}" target="_blank" rel="noopener">
+            ESPN Profile ↗
+          </a>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+</section>
+
+
+{# ══════════════════════════════════════════════════════════════════════
+   KEY STATS HEADLINE ROW  (from ESPN — current season averages)
+   ══════════════════════════════════════════════════════════════════════ #}
+{% if profile and profile.key_stats %}
+<section>
+  <h2>{{ profile.current_season.get('Season', 'Current Season') if profile.current_season else 'Season Averages' }}
+      <span class="date-label">ESPN</span></h2>
+
+  <div class="pd-key-stats">
+    {% for ks in profile.key_stats %}
+    <div class="pd-stat-box">
+      <span class="pd-stat-val">{{ ks.value }}</span>
+      <span class="pd-stat-lbl">{{ ks.abbr }}</span>
+      <span class="pd-stat-full">{{ ks.label }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════
+   ALL AVERAGES  (full season_averages dict from ESPN JSON API)
+   ══════════════════════════════════════════════════════════════════════ #}
+{% if profile and profile.season_averages %}
+<section>
+  <h2>Season Averages <span class="date-label">ESPN JSON</span></h2>
+  <div class="pd-averages-grid">
+    {% for label, value in profile.season_averages.items() %}
+    <div class="pd-avg-item">
+      <span class="pd-avg-val">{{ value }}</span>
+      <span class="pd-avg-lbl">{{ label }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════
+   CAREER TABLE  (scraped from ESPN HTML with BeautifulSoup)
+   ══════════════════════════════════════════════════════════════════════ #}
+{% if profile and profile.seasons %}
+<section>
+  <h2>Career Statistics <span class="date-label">Scraped · ESPN</span></h2>
+  <div class="table-wrap">
+    <table class="injury-table pd-career-table">
+      <thead>
+        <tr>
+          <th class="col-name">Season</th>
+          <th>Team</th>
+          {% for col in profile.raw_headers %}
+            {% if col %}
+              <th>{{ col }}</th>
+            {% endif %}
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in profile.seasons %}
+          {% set is_career = row.get('Season', '') | lower in ('career', 'total', '') %}
+          <tr class="{{ 'pd-career-row' if is_career else '' }}">
+            <td class="col-name">{{ row.get('Season', '—') }}</td>
+            <td>{{ row.get('Team', '—') }}</td>
+            {% for col in profile.raw_headers %}
+              {% if col %}
+                <td>{{ row.get(col, '—') }}</td>
+              {% endif %}
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% elif profile and not profile.seasons and not profile.errors %}
+<section>
+  <p class="empty">No career table data returned by ESPN scraper.</p>
+</section>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════
+   RECENT GAME LOG  (from our own DB — last 10 games)
+   ══════════════════════════════════════════════════════════════════════ #}
+{% if recent_games %}
+<section>
+  <h2>Recent Games <span class="date-label">Last {{ recent_games | length }}</span></h2>
+  <div class="table-wrap">
+    <table class="box-table">
+      <thead>
+        <tr>
+          <th class="col-name" style="text-align:left">Date</th>
+          <th class="col-name" style="text-align:left">Matchup</th>
+          <th class="col-min">MIN</th>
+          <th class="col-num">PTS</th>
+          <th class="col-num">REB</th>
+          <th class="col-num">AST</th>
+          <th class="col-num">STL</th>
+          <th class="col-num">BLK</th>
+          <th class="col-num">TO</th>
+          <th class="col-shoot">FG</th>
+          <th class="col-shoot">3PT</th>
+          <th class="col-shoot">FT</th>
+          <th class="col-pm">+/-</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in recent_games %}
+          {% set min_str = g.minutes.split(':')[0] ~ ':' ~ g.minutes.split(':')[1]
+                           if g.minutes and ':' in g.minutes else (g.minutes or '—') %}
+          {% set pm = g.plus_minus %}
+          {% if g.team_id == g.home_team_id %}
+            {% set opp = g.visitor_abbr %}
+            {% set venue = 'vs' %}
+          {% else %}
+            {% set opp = g.home_abbr %}
+            {% set venue = '@' %}
+          {% endif %}
+        <tr>
+          <td style="text-align:left; font-size:0.78rem; color:var(--muted)">{{ g.game_date }}</td>
+          <td style="text-align:left; font-weight:600">{{ venue }} {{ opp }}</td>
+          <td class="muted">{{ min_str }}</td>
+          <td class="bold">{{ g.pts if g.pts is not none else '—' }}</td>
+          <td>{{ g.reb if g.reb is not none else '—' }}</td>
+          <td>{{ g.ast if g.ast is not none else '—' }}</td>
+          <td>{{ g.stl if g.stl is not none else '—' }}</td>
+          <td>{{ g.blk if g.blk is not none else '—' }}</td>
+          <td>{{ g.turnovers if g.turnovers is not none else '—' }}</td>
+          <td class="muted">{{ (g.fgm|default(0)) ~ '/' ~ (g.fga|default(0)) }}</td>
+          <td class="muted">{{ (g.fg3m|default(0)) ~ '/' ~ (g.fg3a|default(0)) }}</td>
+          <td class="muted">{{ (g.ftm|default(0)) ~ '/' ~ (g.fta|default(0)) }}</td>
+          <td class="{{ 'pm-pos' if pm and pm > 0 else 'pm-neg' if pm and pm < 0 else '' }}">
+            {% if pm is not none %}{{ ('+' ~ pm|int) if pm > 0 else pm|int }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════
+   ESPN UNAVAILABLE / PARTIAL ERRORS
+   ══════════════════════════════════════════════════════════════════════ #}
+{% if not profile %}
+<section>
+  <div class="pd-espn-error">
+    <strong>ESPN data unavailable.</strong>
+    Could not resolve an ESPN athlete profile for <em>{{ player_name }}</em>.
+    Game-log data above comes from our local database.
+  </div>
+</section>
+{% elif profile.errors %}
+<section>
+  <details class="pd-error-details">
+    <summary>{{ profile.errors | length }} ESPN data source(s) had issues</summary>
+    <ul>
+      {% for err in profile.errors %}<li>{{ err }}</li>{% endfor %}
+    </ul>
+  </details>
+</section>
+{% endif %}
+
+{% endblock %}

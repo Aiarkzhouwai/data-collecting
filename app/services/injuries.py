@@ -1,96 +1,118 @@
 """
-Fetch the official NBA injury report from the NBA CDN JSON feed and store
-it in the injury_reports table.
+Fetch the NBA injury report from the ESPN public API and store it in the
+injury_reports table.
 
-Source: https://cdn.nba.com/static/json/liveData/injuryreport/injuryreport.json
+Source: https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries
 
-The feed is re-published several times a day.  Each call to
-fetch_and_store_injuries() replaces all rows for the current report_date,
-so running it repeatedly is safe and idempotent.
+ESPN groups injuries by team; each record includes player name, status, and
+a human-readable comment. The feed is publicly accessible and does not require
+authentication.
 
-Key normalisation performed here:
-  - Dates from the CDN arrive as "MM/DD/YYYY"; we store them as ISO "YYYY-MM-DD"
-    so they join cleanly against the games table.
-  - report_time and game_time are stored verbatim ("5:30 PM ET").
-  - The report timestamp is also written to the meta table for easy template access.
+Notes:
+  - ESPN status values differ from the official NBA report:
+      Out, Day-To-Day, Questionable, Probable, Doubtful, Suspension, IR
+  - game_date / game_time are stored as NULL — ESPN does not provide per-game
+    injury scheduling like the NBA CDN JSON does.  The /injuries/tomorrow page
+    matches players to tomorrow's games purely by team abbreviation.
+  - Team abbreviations are resolved from nba_api's static team list using
+    the full team name that ESPN provides.
 """
 
 import requests
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+
+from nba_api.stats.static import teams as nba_teams_static
 
 from app.db import get_db
 from app.logger import logger
 
-CDN_URL = "https://cdn.nba.com/static/json/liveData/injuryreport/injuryreport.json"
+ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
 
 _HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; NBA-Dashboard/1.0)",
-    "Accept":     "application/json",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept":          "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 
-
-# ── Date normalisation ────────────────────────────────────────────────────────
-
-def _to_iso(date_str: str | None) -> str | None:
-    """
-    Convert a date string to ISO format (YYYY-MM-DD).
-
-    Handles:
-      "MM/DD/YYYY"  →  "YYYY-MM-DD"   (CDN format)
-      "YYYY-MM-DD"  →  unchanged       (already ISO)
-    Returns None if the input is empty or unparseable.
-    """
-    if not date_str:
-        return None
-    s = date_str.strip()
-    if len(s) == 10 and s[4] == "-":
-        return s  # already ISO
-    try:
-        return datetime.strptime(s, "%m/%d/%Y").date().isoformat()
-    except ValueError:
-        logger.warning("Unrecognised date format in injury feed: %r", s)
-        return s  # store as-is rather than silently dropping
+# Build a lookup from full team name → abbreviation, e.g. "Boston Celtics" → "BOS"
+_TEAM_NAME_TO_ABBR: dict[str, str] = {
+    t["full_name"]: t["abbreviation"]
+    for t in nba_teams_static.get_teams()
+}
 
 
 # ── Main ingest function ──────────────────────────────────────────────────────
 
 def fetch_and_store_injuries() -> int:
     """
-    Download the latest NBA injury report and upsert into the DB.
+    Download the latest ESPN NBA injury report and upsert into the DB.
     Returns the number of player records stored (0 on failure).
     """
-    logger.info("Fetching injury report from NBA CDN")
+    logger.info("Fetching injury report from ESPN")
 
     try:
-        resp = requests.get(CDN_URL, timeout=15, headers=_HEADERS)
+        resp = requests.get(ESPN_URL, timeout=15, headers=_HEADERS)
         resp.raise_for_status()
         data = resp.json()
     except requests.HTTPError as exc:
-        logger.error("NBA CDN returned HTTP %s: %s", exc.response.status_code, exc)
+        logger.error("ESPN returned HTTP %s: %s", exc.response.status_code, exc)
         return 0
     except Exception as exc:
         logger.error("Failed to fetch injury report: %s", exc, exc_info=True)
         return 0
 
     # ── Parse report metadata ─────────────────────────────────────────────────
-    report_date = _to_iso(data.get("injuryReportDate")) or date.today().isoformat()
-    report_time = (data.get("injuryReportTime") or "").strip()
-    injuries    = data.get("injuries") or []
+    report_date = date.today().isoformat()
+    # ESPN top-level timestamp, e.g. "2026-04-01T00:03:10Z"
+    raw_ts = data.get("timestamp") or ""
+    try:
+        report_time = (
+            datetime.strptime(raw_ts, "%Y-%m-%dT%H:%M:%SZ")
+            .replace(tzinfo=timezone.utc)
+            .strftime("%-I:%M %p UTC")
+        )
+    except ValueError:
+        report_time = raw_ts
 
+    team_groups = data.get("injuries") or []
     logger.info(
-        "Report: %s %s — %d player entries received",
-        report_date, report_time, len(injuries),
+        "ESPN report as of %s — %d team group(s) received",
+        raw_ts, len(team_groups),
     )
 
-    if not injuries:
-        logger.warning("Injury feed returned zero entries — nothing stored")
+    # ── Flatten into individual injury records ────────────────────────────────
+    flat: list[dict] = []
+    for group in team_groups:
+        team_name = group.get("displayName", "")
+        team_abbr = _TEAM_NAME_TO_ABBR.get(team_name, "")
+        if not team_abbr:
+            logger.debug("Unknown team name from ESPN: %r", team_name)
+
+        for inj in group.get("injuries") or []:
+            athlete = inj.get("athlete") or {}
+            flat.append({
+                "team_name":      team_name,
+                "team_abbr":      team_abbr,
+                "player_first":   athlete.get("firstName", ""),
+                "player_last":    athlete.get("lastName", ""),
+                "player_status":  inj.get("status", ""),
+                "player_comment": inj.get("shortComment") or inj.get("longComment") or "",
+            })
+
+    logger.info("%d player record(s) parsed", len(flat))
+    if not flat:
+        logger.warning("ESPN injury feed returned zero player entries — nothing stored")
         return 0
 
     # ── Store records ─────────────────────────────────────────────────────────
     conn = get_db()
 
-    # Replace all rows for this report date so refreshing never duplicates
+    # Replace all rows for this report date
     deleted = conn.execute(
         "DELETE FROM injury_reports WHERE report_date = ?", (report_date,)
     ).rowcount
@@ -98,10 +120,7 @@ def fetch_and_store_injuries() -> int:
         logger.info("Replaced %d stale record(s) for %s", deleted, report_date)
 
     stored = 0
-    for item in injuries:
-        game_date = _to_iso(item.get("gameDate"))
-        game_time = (item.get("gameTime") or "").strip()
-
+    for item in flat:
         try:
             conn.execute(
                 """
@@ -111,29 +130,28 @@ def fetch_and_store_injuries() -> int:
                      team_id,     team_abbr,   team_city,  team_name,
                      player_first, player_last,
                      player_status, player_comment)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, NULL, NULL, NULL,
+                        NULL, ?, NULL, ?,
+                        ?, ?, ?, ?)
                 """,
                 (
                     report_date,  report_time,
-                    game_date,    game_time,    item.get("gameId"),
-                    item.get("teamId"),
-                    item.get("teamAbbreviation"),
-                    item.get("teamCity"),
-                    item.get("teamName"),
-                    item.get("playerFirstName"),
-                    item.get("playerLastName"),
-                    item.get("playerStatus"),
-                    item.get("playerComment"),
+                    item["team_abbr"],
+                    item["team_name"],
+                    item["player_first"],
+                    item["player_last"],
+                    item["player_status"],
+                    item["player_comment"],
                 ),
             )
             stored += 1
         except Exception as exc:
             logger.warning(
                 "Could not store injury record (%s %s): %s",
-                item.get("playerFirstName"), item.get("playerLastName"), exc,
+                item.get("player_first"), item.get("player_last"), exc,
             )
 
-    # Write report timestamp to meta so templates can display it without a JOIN
+    # Write report timestamp to meta
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('injury_report_date', ?)",
         (report_date,),
@@ -147,14 +165,11 @@ def fetch_and_store_injuries() -> int:
     conn.close()
 
     # ── Logging summary ───────────────────────────────────────────────────────
-    teams_affected = len({i.get("teamAbbreviation") for i in injuries})
-    status_counts  = Counter(i.get("playerStatus") for i in injuries)
+    teams_affected = len({i["team_abbr"] for i in flat if i["team_abbr"]})
+    status_counts  = Counter(i["player_status"] for i in flat)
 
-    logger.info(
-        "Stored %d record(s) across %d team(s)", stored, teams_affected
-    )
-    for status in ("Out", "Doubtful", "Questionable", "Probable"):
-        if status_counts[status]:
-            logger.info("  %-14s %d", status, status_counts[status])
+    logger.info("Stored %d record(s) across %d team(s)", stored, teams_affected)
+    for status, n in status_counts.most_common():
+        logger.info("  %-14s %d", status, n)
 
     return stored

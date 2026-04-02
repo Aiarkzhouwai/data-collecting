@@ -1,0 +1,1344 @@
+{% extends "base.html" %}
+{% block title %}{{ game.visitor_abbr }} @ {{ game.home_abbr }} — NBA Dashboard{% endblock %}
+
+{% block content %}
+
+{# ── Macros ──────────────────────────────────────────────────────── #}
+{% macro stat_bar(label, vis_val, home_val, higher_is_better=true) %}
+{% set v = vis_val | float(0) %}
+{% set h = home_val | float(0) %}
+{% set total = v + h %}
+{% set vis_pct  = ((v / total * 100) | round | int) if total > 0 else 50 %}
+{% set home_pct = 100 - vis_pct %}
+{% set vis_win  = (v > h) if higher_is_better else (v < h) %}
+{% set home_win = (h > v) if higher_is_better else (h < v) %}
+<div class="sbar-row">
+  <span class="sbar-val {{ 'sbar-leader' if vis_win }}">{{ vis_val }}</span>
+  <div class="sbar-track">
+    <div class="sbar-fill sbar-vis {{ 'sbar-fill-lead' if vis_win }}" style="width:{{ vis_pct }}%"></div>
+    <span class="sbar-label">{{ label }}</span>
+    <div class="sbar-fill sbar-home {{ 'sbar-fill-lead' if home_win }}" style="width:{{ home_pct }}%"></div>
+  </div>
+  <span class="sbar-val {{ 'sbar-leader' if home_win }}">{{ home_val }}</span>
+</div>
+{% endmacro %}
+
+{% macro player_row(p, is_starter) %}
+{% set min_str = p.minutes.split(':')[0] ~ ":" ~ p.minutes.split(':')[1] if p.minutes and ':' in p.minutes else (p.minutes or '—') %}
+{% set pm = p.plus_minus %}
+<tr class="{{ 'starter' if is_starter else 'bench' }}" data-player-id="{{ p.player_id }}">
+  <td class="col-name">
+    {% if p.player_id %}
+      <a class="player-link" href="/players/{{ p.player_id }}">{{ p.player_name or '—' }}</a>
+    {% else %}
+      {{ p.player_name or '—' }}
+    {% endif %}
+    {% if is_starter %}<span class="starter-dot" title="Starter">&#9679;</span>{% endif %}
+  </td>
+  <td class="col-pos muted">{{ p.start_position or '—' }}</td>
+  <td class="col-min muted">{{ min_str }}</td>
+  <td class="col-num bold">{{ p.pts if p.pts is not none else '—' }}</td>
+  <td class="col-num">{{ p.reb if p.reb is not none else '—' }}</td>
+  <td class="col-num">{{ p.ast if p.ast is not none else '—' }}</td>
+  <td class="col-num">{{ p.stl if p.stl is not none else '—' }}</td>
+  <td class="col-num">{{ p.blk if p.blk is not none else '—' }}</td>
+  <td class="col-num">{{ p.turnovers if p.turnovers is not none else '—' }}</td>
+  <td class="col-shoot muted">{{ (p.fgm|default(0)) ~ "/" ~ (p.fga|default(0)) }}</td>
+  <td class="col-shoot muted">{{ (p.fg3m|default(0)) ~ "/" ~ (p.fg3a|default(0)) }}</td>
+  <td class="col-shoot muted">{{ (p.ftm|default(0)) ~ "/" ~ (p.fta|default(0)) }}</td>
+  <td class="col-pm {{ 'pm-pos' if pm and pm > 0 else 'pm-neg' if pm and pm < 0 else '' }}">
+    {% if pm is not none %}{{ ("+" ~ pm|int) if pm > 0 else pm|int }}{% else %}—{% endif %}
+  </td>
+</tr>
+{% endmacro %}
+
+{% macro player_table(abbr, starter_players, bench_players) %}
+<div class="player-section">
+  <h4 class="player-section-hdr">{{ abbr }}</h4>
+  <div class="table-wrap">
+    <table class="box-table">
+      <thead>
+        <tr>
+          <th class="col-name">Player</th>
+          <th class="col-pos"  title="Position">Pos</th>
+          <th class="col-min"  title="Minutes">Min</th>
+          <th class="col-num">PTS</th>
+          <th class="col-num">REB</th>
+          <th class="col-num">AST</th>
+          <th class="col-num">STL</th>
+          <th class="col-num">BLK</th>
+          <th class="col-num">TO</th>
+          <th class="col-shoot">FG</th>
+          <th class="col-shoot">3PT</th>
+          <th class="col-shoot">FT</th>
+          <th class="col-pm">+/-</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if starter_players %}
+        <tr class="rotation-divider"><td colspan="13">STARTERS</td></tr>
+        {% for p in starter_players %}{{ player_row(p, true) }}{% endfor %}
+        {% endif %}
+        {% if bench_players %}
+        <tr class="rotation-divider bench-divider"><td colspan="13">BENCH</td></tr>
+        {% for p in bench_players %}{{ player_row(p, false) }}{% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endmacro %}
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 1. SCORE HEADER                                                    #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<section class="gd-section">
+  <div class="gd-hero">
+
+    {# Visitor #}
+    <div class="hero-team {{ 'gd-winner' if game.visitor_pts is not none and game.home_pts is not none and game.visitor_pts > game.home_pts }}">
+      <img class="hero-logo" src="{{ game.visitor_logo }}" alt="{{ game.visitor_abbr }}" onerror="this.style.display='none'">
+      <span class="hero-abbr">{{ game.visitor_abbr }}</span>
+      <span class="hero-name">{{ game.visitor_name }}</span>
+      <span class="hero-score" id="score-vis">{{ game.visitor_pts if game.visitor_pts is not none else '—' }}</span>
+    </div>
+
+    {# Centre #}
+    <div class="hero-center">
+      {% if game.game_status_id == 2 %}
+        <div class="status-live" id="live-status">● LIVE · {{ game.status_text }}</div>
+      {% elif game.game_status_id == 3 %}
+        <div class="hero-final">FINAL</div>
+        <div class="hero-date">{{ game.game_date }}</div>
+      {% else %}
+        <div class="hero-tip">{{ game.status_text }}</div>
+        <div class="hero-date">{{ game.game_date }}</div>
+      {% endif %}
+    </div>
+
+    {# Home #}
+    <div class="hero-team hero-team-right {{ 'gd-winner' if game.home_pts is not none and game.visitor_pts is not none and game.home_pts > game.visitor_pts }}">
+      <span class="hero-score" id="score-home">{{ game.home_pts if game.home_pts is not none else '—' }}</span>
+      <span class="hero-abbr">{{ game.home_abbr }}</span>
+      <span class="hero-name">{{ game.home_name }}</span>
+      <img class="hero-logo" src="{{ game.home_logo }}" alt="{{ game.home_abbr }}" onerror="this.style.display='none'">
+    </div>
+
+  </div>
+</section>
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 2. QUARTER-BY-QUARTER SCORING                                      #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{% if period_table %}
+<section>
+  <h2>Quarter-by-Quarter</h2>
+  <div class="qtable-wrap">
+    <table class="qtable">
+      <thead>
+        <tr>
+          <th class="qt-team">Team</th>
+          {% for row in period_table %}
+          <th>{{ row.label }}</th>
+          {% endfor %}
+          <th class="qt-total">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {# Visitor row #}
+        <tr>
+          <td class="qt-team">{{ game.visitor_abbr }}</td>
+          {% set vis_total = namespace(v=0) %}
+          {% for row in period_table %}
+          {% if row.visitor_score is not none %}{% set vis_total.v = vis_total.v + row.visitor_score %}{% endif %}
+          <td class="{{ 'qt-win' if row.visitor_score is not none and row.home_score is not none and row.visitor_score > row.home_score }}">
+            {{ row.visitor_score if row.visitor_score is not none else '—' }}
+          </td>
+          {% endfor %}
+          <td class="qt-total bold">{{ game.visitor_pts if game.visitor_pts is not none else '—' }}</td>
+        </tr>
+        {# Home row #}
+        <tr>
+          <td class="qt-team">{{ game.home_abbr }}</td>
+          {% for row in period_table %}
+          <td class="{{ 'qt-win' if row.home_score is not none and row.visitor_score is not none and row.home_score > row.visitor_score }}">
+            {{ row.home_score if row.home_score is not none else '—' }}
+          </td>
+          {% endfor %}
+          <td class="qt-total bold">{{ game.home_pts if game.home_pts is not none else '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 3. TEAM STAT COMPARISON (stat bars)                                #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{% if visitor_stats and home_stats %}
+{% set vs = visitor_stats %}
+{% set hs = home_stats %}
+<section>
+  <h2>Team Stats</h2>
+  <div class="sbar-header">
+    <span>{{ game.visitor_abbr }}</span>
+    <span>{{ game.home_abbr }}</span>
+  </div>
+  <div class="sbar-container">
+    {{ stat_bar("Points",      vs.pts,    hs.pts) }}
+    {{ stat_bar("Rebounds",    vs.reb,    hs.reb) }}
+    {{ stat_bar("Assists",     vs.ast,    hs.ast) }}
+    {{ stat_bar("Steals",      vs.stl,    hs.stl) }}
+    {{ stat_bar("Blocks",      vs.blk,    hs.blk) }}
+    {{ stat_bar("FG%",  "%.1f"|format((vs.fg_pct  or 0)*100), "%.1f"|format((hs.fg_pct  or 0)*100)) }}
+    {{ stat_bar("3PT%", "%.1f"|format((vs.fg3_pct or 0)*100), "%.1f"|format((hs.fg3_pct or 0)*100)) }}
+    {{ stat_bar("FG",   (vs.fgm|default(0))~"/"~(vs.fga|default(0)),  (hs.fgm|default(0))~"/"~(hs.fga|default(0))) }}
+    {{ stat_bar("3PT",  (vs.fg3m|default(0))~"/"~(vs.fg3a|default(0)), (hs.fg3m|default(0))~"/"~(hs.fg3a|default(0))) }}
+    {{ stat_bar("FT",   (vs.ftm|default(0))~"/"~(vs.fta|default(0)),  (hs.ftm|default(0))~"/"~(hs.fta|default(0))) }}
+  </div>
+</section>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 4. ANALYSIS — Starters vs Bench + Trailing Periods                 #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{% if analysis.visitor.starters or analysis.home.starters %}
+<section>
+  <h2>Analysis — Starters vs Bench</h2>
+
+  {# ── Trail context from quarters ────────────────────────────────── #}
+  {% if trail_analysis %}
+  <div class="trail-timeline">
+    {% for q in trail_analysis %}
+    <div class="trail-q {{ 'trail-vis' if q.trailing == 'visitor' else 'trail-home' if q.trailing == 'home' else 'trail-tied' }}">
+      <span class="trail-label">{{ q.label }}</span>
+      <span class="trail-score">{{ q.visitor_pts_q }}–{{ q.home_pts_q }}</span>
+      <span class="trail-cumul">{{ q.visitor_cumul }}–{{ q.home_cumul }}</span>
+      {% if q.trailing != 'tied' %}
+      <span class="trail-tag">
+        {% if q.trailing == 'visitor' %}{{ game.visitor_abbr }} –{{ q.margin }}
+        {% else %}{{ game.home_abbr }} –{{ q.margin }}{% endif %}
+      </span>
+      {% else %}
+      <span class="trail-tag trail-tied-tag">Tied</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ── Per-team starters vs bench tables ───────────────────────────── #}
+  {% for side in ['visitor', 'home'] %}
+  {% set a = analysis[side] %}
+  {% if a.starters or a.bench %}
+  <div class="analysis-team">
+    <h3 class="analysis-team-hdr">{{ a.abbr }}</h3>
+    <div class="analysis-grid">
+
+      {% for grp_label, agg, players in [
+          ('Starters', a.starters, a.starter_players),
+          ('Bench',    a.bench,    a.bench_players),
+      ] %}
+      {% if agg %}
+      <div class="analysis-card">
+        <div class="analysis-card-hdr">
+          <span class="rotation-tag {{ 'tag-starter' if grp_label == 'Starters' else 'tag-bench' }}">{{ grp_label }}</span>
+          <span class="analysis-player-count">{{ agg.count }} player{{ 's' if agg.count != 1 }}</span>
+        </div>
+        <div class="analysis-stats">
+          <div class="astat">
+            <span class="astat-val">{{ agg.pts }}</span>
+            <span class="astat-lbl">PTS</span>
+          </div>
+          <div class="astat">
+            <span class="astat-val">{{ agg.reb }}</span>
+            <span class="astat-lbl">REB</span>
+          </div>
+          <div class="astat">
+            <span class="astat-val">{{ agg.ast }}</span>
+            <span class="astat-lbl">AST</span>
+          </div>
+          <div class="astat">
+            <span class="astat-val">{{ agg.fg_pct }}%</span>
+            <span class="astat-lbl">FG%</span>
+          </div>
+          <div class="astat">
+            <span class="astat-val">{{ agg.fg3_pct }}%</span>
+            <span class="astat-lbl">3PT%</span>
+          </div>
+          <div class="astat">
+            <span class="astat-val {{ 'pm-pos' if agg.pm > 0 else 'pm-neg' if agg.pm < 0 else '' }}">
+              {{ ("+" ~ agg.pm) if agg.pm > 0 else agg.pm }}
+            </span>
+            <span class="astat-lbl">+/-</span>
+          </div>
+        </div>
+        {# Top 3 contributors #}
+        <div class="analysis-contributors">
+          {% for p in players | sort(attribute='pts', reverse=true) | list %}{% if loop.index <= 3 %}
+          <span class="contributor">
+            {% if p.player_id %}
+              <a class="player-link contributor-name" href="/players/{{ p.player_id }}">{{ p.player_name or '?' }}</a>
+            {% else %}
+              <span class="contributor-name">{{ p.player_name or '?' }}</span>
+            {% endif %}
+            <span class="contributor-line">{{ p.pts }}p {{ p.reb }}r {{ p.ast }}a</span>
+          </span>
+          {% endif %}{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+
+    </div>
+  </div>
+  {% endif %}
+  {% endfor %}
+
+</section>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 5. ROTATION ANALYSIS — Leading / Close / Trailing                  #}
+{# ══════════════════════════════════════════════════════════════════ #}
+
+{# ── Situation column macro ──────────────────────────────────────── #}
+{% macro ra_situation(sit, sit_class, sit_title) %}
+<div class="ra-situation ra-{{ sit_class }}">
+
+  {# Header #}
+  <div class="ra-sit-hdr">
+    <span class="ra-sit-label ra-label-{{ sit_class }}">{{ sit_title }}</span>
+    {% if sit.labels %}
+      <span class="ra-sit-periods">{{ sit.labels | join(' · ') }}</span>
+    {% else %}
+      <span class="ra-sit-none">—</span>
+    {% endif %}
+  </div>
+
+  {% if sit.labels and (sit.starters or sit.bench) %}
+    {% for grp_label, agg, players in [
+        ('Starters', sit.starters, sit.starter_players),
+        ('Bench',    sit.bench,    sit.bench_players),
+    ] %}
+    {% if agg %}
+    <div class="ra-group">
+      <div class="ra-group-hdr">
+        <span class="rotation-tag {{ 'tag-starter' if grp_label == 'Starters' else 'tag-bench' }}">{{ grp_label }}</span>
+        <span class="ra-group-count">{{ agg.count }} player{{ 's' if agg.count != 1 }}</span>
+      </div>
+
+      {# Aggregate summary bar #}
+      <div class="ra-agg-bar">
+        <span class="ra-agg-pts">{{ agg.pts }}<small>PTS</small></span>
+        <span class="ra-agg-stat">{{ agg.fg_pct }}%<small>FG</small></span>
+        <span class="ra-agg-stat">{{ agg.fg3_pct }}%<small>3P</small></span>
+        <span class="ra-agg-stat">{{ agg.reb }}<small>REB</small></span>
+        <span class="ra-agg-stat {{ 'ra-to-warn' if agg.to >= 4 }}">{{ agg.to }}<small>TO</small></span>
+      </div>
+
+      {# Per-player table #}
+      <div class="table-wrap">
+        <table class="ra-table">
+          <thead>
+            <tr>
+              <th class="ra-th-name">Player</th>
+              <th class="ra-th-num" title="Full-game minutes">MIN</th>
+              <th class="ra-th-num">PTS</th>
+              <th class="ra-th-num">REB</th>
+              <th class="ra-th-num">FG</th>
+              <th class="ra-th-num">3P</th>
+              <th class="ra-th-num">FT</th>
+              <th class="ra-th-num">TO</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in players %}
+            {% set mins = p.minutes.split(':')[0] if p.minutes and ':' in p.minutes else (p.minutes or '—') %}
+            <tr class="ra-tr">
+              <td class="ra-td-name">
+                {% if p.player_id %}
+                  <a class="player-link" href="/players/{{ p.player_id }}">{{ p.player_name or '?' }}</a>
+                {% else %}
+                  {{ p.player_name or '?' }}
+                {% endif %}
+              </td>
+              <td class="ra-td-num ra-shoot">{{ mins }}</td>
+              <td class="ra-td-num ra-pts">{{ p.pts }}</td>
+              <td class="ra-td-num">{{ p.reb }}</td>
+              <td class="ra-td-num ra-shoot">{{ p.fgm }}/{{ p.fga }}</td>
+              <td class="ra-td-num ra-shoot">{{ p.fg3m }}/{{ p.fg3a }}</td>
+              <td class="ra-td-num ra-shoot">{{ p.ftm }}/{{ p.fta }}</td>
+              <td class="ra-td-num {{ 'ra-to-warn' if p.turnovers >= 3 }}">{{ p.turnovers }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
+  {% elif sit.labels %}
+    <p class="empty ra-loading">Loading per-quarter data…</p>
+  {% else %}
+    <p class="ra-absent">No {{ sit_title | lower }} quarters</p>
+  {% endif %}
+
+</div>
+{% endmacro %}
+
+<section id="rotation-section">
+  <h2>Rotation Analysis
+    <span class="date-label">Leading · Close · Trailing</span>
+    <span class="date-label" id="ra-duration-badge">{% if rotation_stats and rotation_stats.duration_label %}{{ rotation_stats.duration_label }}{% endif %}</span>
+    <span class="date-label" id="ra-refresh-badge"></span>
+  </h2>
+
+  <div id="rotation-content">
+  {% if not rotation_stats or not rotation_stats.has_data %}
+    <p class="empty">
+      Per-quarter rotation data not yet available.
+      {% if game.game_status_id == 1 %}Game hasn't started yet.
+      {% elif game.game_status_id == 2 %}Data loads as quarters complete.
+      {% endif %}
+    </p>
+  {% else %}
+    {% for side_key in ['visitor', 'home'] %}
+    {% set side = rotation_stats[side_key] %}
+    {% set ps = side.playoff_status | default('unknown') %}
+    <div class="ra-team">
+      <h3 class="ra-team-hdr">
+        {{ side.abbr }}
+        {% if ps == 'playoff' %}
+          <span class="ra-badge ra-badge-playoff">Playoff</span>
+        {% elif ps == 'playin' %}
+          <span class="ra-badge ra-badge-playin">Play-In</span>
+        {% elif ps == 'none' %}
+          <span class="ra-badge ra-badge-eliminated">Not in Playoffs</span>
+        {% endif %}
+      </h3>
+      {% if ps == 'none' %}
+        <p class="ra-absent">Rotation data not shown — team not in playoff contention.</p>
+      {% else %}
+      <div class="ra-grid">
+        {{ ra_situation(side.leading,  'leading',  'Leading')   }}
+        {{ ra_situation(side.close,    'close',    'Close Game') }}
+        {{ ra_situation(side.trailing, 'trailing', 'Trailing')  }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% endif %}
+  </div>
+</section>
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 5b. ROTATION TIMELINE — per-player substitution stints            #}
+{# ══════════════════════════════════════════════════════════════════ #}
+
+{# ── Stint table macro ───────────────────────────────────────────── #}
+{% macro stint_team_table(side) %}
+<div class="stint-team">
+  <h3 class="stint-team-hdr">{{ side.abbr }}</h3>
+  {% set starters = side.players | selectattr('is_starter') | list %}
+  {% set bench    = side.players | rejectattr('is_starter') | list %}
+  <div class="table-wrap">
+    <table class="stint-table">
+      <thead>
+        <tr>
+          <th class="st-th-name">Player</th>
+          <th class="st-th-q">Q</th>
+          <th class="st-th-clk" title="Elapsed from period start">Entered</th>
+          <th class="st-th-clk" title="Elapsed from period start">Exited</th>
+          <th class="st-th-num" title="Stint duration">DUR</th>
+          <th class="st-th-num">PTS</th>
+          <th class="st-th-num">REB</th>
+          <th class="st-th-num">FG</th>
+          <th class="st-th-num">3P</th>
+          <th class="st-th-num">FT</th>
+          <th class="st-th-num">TO</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if starters %}
+        <tr class="stint-grp-hdr"><td colspan="11">Starters</td></tr>
+        {% for player in starters %}
+        {% for s in player.stints %}
+        <tr class="stint-row {{ 'stint-first' if loop.first else 'stint-cont' }}">
+          <td class="st-td-name">
+            {% if loop.first %}
+              {% if player.player_id %}
+                <a class="player-link" href="/players/{{ player.player_id }}">{{ player.player_name }}</a>
+              {% else %}
+                {{ player.player_name }}
+              {% endif %}
+              <span class="starter-dot" title="Starter">&#9679;</span>
+            {% endif %}
+          </td>
+          <td class="st-td-q">{{ s.period_label }}</td>
+          <td class="st-td-clk">{{ s.enter_clock }}</td>
+          <td class="st-td-clk">
+            {% if s.is_active %}<span class="st-active-badge">Active</span>{% else %}{{ s.exit_clock }}{% endif %}
+          </td>
+          <td class="st-td-num">{{ s.duration_str }}</td>
+          <td class="st-td-num st-pts">{{ s.pts }}</td>
+          <td class="st-td-num">{{ s.reb }}</td>
+          <td class="st-td-num st-shoot">{{ s.fgm }}/{{ s.fga }}</td>
+          <td class="st-td-num st-shoot">{{ s.fg3m }}/{{ s.fg3a }}</td>
+          <td class="st-td-num st-shoot">{{ s.ftm }}/{{ s.fta }}</td>
+          <td class="st-td-num {{ 'st-to-warn' if s.turnovers >= 2 }}">{{ s.turnovers }}</td>
+        </tr>
+        {% endfor %}
+        {# Totals row (only when player has multiple stints) #}
+        {% if player.stints | length > 1 %}
+        {% set t = player.totals %}
+        <tr class="stint-totals-row">
+          <td class="st-td-name st-totals-label">
+            <span class="st-total-min">Total {{ player.total_min_str }}</span>
+          </td>
+          <td class="st-td-q">—</td>
+          <td class="st-td-clk">—</td>
+          <td class="st-td-clk">—</td>
+          <td class="st-td-num">{{ player.total_min_str }}</td>
+          <td class="st-td-num st-pts">{{ t.pts }}</td>
+          <td class="st-td-num">{{ t.reb }}</td>
+          <td class="st-td-num st-shoot">{{ t.fgm }}/{{ t.fga }}</td>
+          <td class="st-td-num st-shoot">{{ t.fg3m }}/{{ t.fg3a }}</td>
+          <td class="st-td-num st-shoot">{{ t.ftm }}/{{ t.fta }}</td>
+          <td class="st-td-num {{ 'st-to-warn' if t.turnovers >= 2 }}">{{ t.turnovers }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+        {% if bench %}
+        <tr class="stint-grp-hdr stint-bench-hdr"><td colspan="11">Bench</td></tr>
+        {% for player in bench %}
+        {% for s in player.stints %}
+        <tr class="stint-row {{ 'stint-first' if loop.first else 'stint-cont' }}">
+          <td class="st-td-name">
+            {% if loop.first %}
+              {% if player.player_id %}
+                <a class="player-link" href="/players/{{ player.player_id }}">{{ player.player_name }}</a>
+              {% else %}
+                {{ player.player_name }}
+              {% endif %}
+            {% endif %}
+          </td>
+          <td class="st-td-q">{{ s.period_label }}</td>
+          <td class="st-td-clk">{{ s.enter_clock }}</td>
+          <td class="st-td-clk">
+            {% if s.is_active %}<span class="st-active-badge">Active</span>{% else %}{{ s.exit_clock }}{% endif %}
+          </td>
+          <td class="st-td-num">{{ s.duration_str }}</td>
+          <td class="st-td-num st-pts">{{ s.pts }}</td>
+          <td class="st-td-num">{{ s.reb }}</td>
+          <td class="st-td-num st-shoot">{{ s.fgm }}/{{ s.fga }}</td>
+          <td class="st-td-num st-shoot">{{ s.fg3m }}/{{ s.fg3a }}</td>
+          <td class="st-td-num st-shoot">{{ s.ftm }}/{{ s.fta }}</td>
+          <td class="st-td-num {{ 'st-to-warn' if s.turnovers >= 2 }}">{{ s.turnovers }}</td>
+        </tr>
+        {% endfor %}
+        {# Totals row (only when player has multiple stints) #}
+        {% if player.stints | length > 1 %}
+        {% set t = player.totals %}
+        <tr class="stint-totals-row">
+          <td class="st-td-name st-totals-label">
+            <span class="st-total-min">Total {{ player.total_min_str }}</span>
+          </td>
+          <td class="st-td-q">—</td>
+          <td class="st-td-clk">—</td>
+          <td class="st-td-clk">—</td>
+          <td class="st-td-num">{{ player.total_min_str }}</td>
+          <td class="st-td-num st-pts">{{ t.pts }}</td>
+          <td class="st-td-num">{{ t.reb }}</td>
+          <td class="st-td-num st-shoot">{{ t.fgm }}/{{ t.fga }}</td>
+          <td class="st-td-num st-shoot">{{ t.fg3m }}/{{ t.fg3a }}</td>
+          <td class="st-td-num st-shoot">{{ t.ftm }}/{{ t.fta }}</td>
+          <td class="st-td-num {{ 'st-to-warn' if t.turnovers >= 2 }}">{{ t.turnovers }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endmacro %}
+
+<section id="stints-section">
+  <h2>Rotation Timeline
+    <span class="date-label">Entry &amp; exit times elapsed from period start · PTS REB FG 3P FT TO</span>
+    <span class="date-label" id="stints-refresh-badge"></span>
+    {% if game.game_status_id in (1, 2) %}
+    <button class="btn-refresh-stints" id="stints-refresh-btn"
+            onclick="triggerStintsRefresh()" title="Recompute stints now">&#8635; Refresh</button>
+    {% endif %}
+  </h2>
+
+  <div id="stints-error" class="stints-error-bar" style="display:none"></div>
+
+  <div id="stints-content">
+  {% if not stints or not stints.has_data %}
+    <p class="empty" id="stints-empty-msg">
+      {% if game.game_status_id == 1 %}
+        Game hasn't started yet — substitution data will appear once the game begins.
+      {% elif game.game_status_id == 2 %}
+        Rotation data is being computed — check back after the first period completes.
+      {% else %}
+        Rotation timeline not available for this game.
+      {% endif %}
+    </p>
+  {% else %}
+    <div class="stint-grid">
+      {{ stint_team_table(stints.visitor) }}
+      {{ stint_team_table(stints.home) }}
+    </div>
+  {% endif %}
+  </div>
+</section>
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 6. FULL PLAYER BOX SCORES                                          #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{% if visitor_players or home_players %}
+<section>
+  <h2>Player Box Scores</h2>
+  <div class="gd-players">
+    {{ player_table(game.visitor_abbr, analysis.visitor.starter_players, analysis.visitor.bench_players) }}
+    {{ player_table(game.home_abbr,    analysis.home.starter_players,    analysis.home.bench_players) }}
+  </div>
+</section>
+{% else %}
+<section>
+  <p class="empty">
+    Player stats not yet available.
+    {% if game.game_status_id == 2 %}Box scores load after the game ends.{% endif %}
+  </p>
+</section>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# DEBUG PANEL — visible only when ?debug=1 in URL or Ctrl+Shift+D   #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<section id="debug-panel" style="display:none">
+  <h2 class="debug-hdr">
+    &#128270; Debug Inspector
+    <span class="date-label">Ctrl+Shift+D to toggle · ?debug=1 to persist</span>
+    <button class="debug-close-btn" onclick="toggleDebug()" title="Close">&#x2715;</button>
+  </h2>
+
+  <div class="debug-tabs" role="tablist">
+    <button class="debug-tab debug-tab-active" data-tab="stints" onclick="switchDebugTab('stints')">
+      Stints API
+    </button>
+    <button class="debug-tab" data-tab="game" onclick="switchDebugTab('game')">
+      Game API
+    </button>
+    <button class="debug-tab" data-tab="diagnostics" onclick="switchDebugTab('diagnostics')">
+      Diagnostics
+    </button>
+  </div>
+
+  <!-- Stints tab -->
+  <div class="debug-pane" id="debug-pane-stints">
+    <div class="debug-meta" id="debug-stints-meta">No request yet.</div>
+    <div class="debug-flags" id="debug-stints-flags"></div>
+    <pre class="debug-json" id="debug-stints-json">—</pre>
+  </div>
+
+  <!-- Game tab -->
+  <div class="debug-pane" id="debug-pane-game" style="display:none">
+    <div class="debug-meta" id="debug-game-meta">No request yet.</div>
+    <pre class="debug-json" id="debug-game-json">—</pre>
+  </div>
+
+  <!-- Diagnostics tab -->
+  <div class="debug-pane" id="debug-pane-diagnostics" style="display:none">
+    <div class="debug-meta">Stints data analysis — clock values, coverage, gaps.</div>
+    <div id="debug-diagnostics-body" class="debug-diag">
+      <p class="debug-diag-hint">Fetch the Stints API first to populate this tab.</p>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+{% if game.game_status_id == 2 %}
+<script>
+(function() {
+  var gid  = "{{ game.game_id }}";
+  var POLL = 20000; // 20 s
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el && el.textContent !== String(val)) el.textContent = val;
+  }
+  function fmtMin(m) {
+    if (!m) return '—';
+    return m.indexOf(':') !== -1 ? m.split(':')[0] + ':' + m.split(':')[1] : m;
+  }
+  // Integer-only minutes for compact rotation tables (e.g. "32" from "32:45")
+  function fmtMinShort(m) {
+    if (!m) return '—';
+    if (m.indexOf(':') !== -1) return m.split(':')[0];
+    var pt = m.match(/PT(\d+)M/);
+    return pt ? pt[1] : m;
+  }
+  function fmtPm(v) {
+    return (v === null || v === undefined) ? '—' : (v > 0 ? '+' + v : String(v));
+  }
+  function dash(v) { return (v === null || v === undefined) ? '—' : v; }
+  function esc(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── update one player <tr> ────────────────────────────────────────────────
+  function updatePlayerRow(tr, p) {
+    var cells = tr.querySelectorAll('td');
+    if (cells.length < 13) return;
+    function set(i, v) { if (cells[i].textContent !== String(v)) cells[i].textContent = v; }
+    set(2, fmtMin(p.minutes));
+    set(3, dash(p.pts));  set(4, dash(p.reb));  set(5, dash(p.ast));
+    set(6, dash(p.stl));  set(7, dash(p.blk));  set(8, dash(p.turnovers));
+    set(9,  (p.fgm  || 0) + '/' + (p.fga  || 0));
+    set(10, (p.fg3m || 0) + '/' + (p.fg3a || 0));
+    set(11, (p.ftm  || 0) + '/' + (p.fta  || 0));
+    var pmVal = fmtPm(p.plus_minus);
+    if (cells[12].textContent !== pmVal) {
+      cells[12].textContent = pmVal;
+      cells[12].className = 'col-pm' +
+        (p.plus_minus > 0 ? ' pm-pos' : p.plus_minus < 0 ? ' pm-neg' : '');
+    }
+  }
+
+  // ── rotation analysis renderer ────────────────────────────────────────────
+  function buildGroup(label, agg, players) {
+    if (!agg) return '';
+    var tagCls    = label === 'Starters' ? 'tag-starter' : 'tag-bench';
+    var toWarnAgg = agg.to >= 4 ? ' ra-to-warn' : '';
+
+    var rows = (players || []).map(function(p) {
+      var nm = p.player_id
+        ? '<a class="player-link" href="/players/' + p.player_id + '">' + esc(p.player_name || '?') + '</a>'
+        : esc(p.player_name || '?');
+      var toWarn = (p.turnovers || 0) >= 3 ? ' ra-to-warn' : '';
+      return '<tr class="ra-tr">' +
+        '<td class="ra-td-name">'         + nm + '</td>' +
+        '<td class="ra-td-num ra-shoot">' + fmtMinShort(p.minutes) + '</td>' +
+        '<td class="ra-td-num ra-pts">'   + (p.pts       || 0) + '</td>' +
+        '<td class="ra-td-num">'          + (p.reb       || 0) + '</td>' +
+        '<td class="ra-td-num ra-shoot">' + (p.fgm||0)  + '/' + (p.fga||0)  + '</td>' +
+        '<td class="ra-td-num ra-shoot">' + (p.fg3m||0) + '/' + (p.fg3a||0) + '</td>' +
+        '<td class="ra-td-num ra-shoot">' + (p.ftm||0)  + '/' + (p.fta||0)  + '</td>' +
+        '<td class="ra-td-num' + toWarn + '">' + (p.turnovers || 0) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    return '<div class="ra-group">' +
+      '<div class="ra-group-hdr">' +
+        '<span class="rotation-tag ' + tagCls + '">' + label + '</span>' +
+        '<span class="ra-group-count">' + agg.count + ' player' + (agg.count !== 1 ? 's' : '') + '</span>' +
+      '</div>' +
+      '<div class="ra-agg-bar">' +
+        '<span class="ra-agg-pts">'                  + agg.pts     + '<small>PTS</small></span>' +
+        '<span class="ra-agg-stat">'                 + agg.fg_pct  + '%<small>FG</small></span>' +
+        '<span class="ra-agg-stat">'                 + agg.fg3_pct + '%<small>3P</small></span>' +
+        '<span class="ra-agg-stat">'                 + agg.reb     + '<small>REB</small></span>' +
+        '<span class="ra-agg-stat' + toWarnAgg + '">' + agg.to    + '<small>TO</small></span>' +
+      '</div>' +
+      '<div class="table-wrap">' +
+        '<table class="ra-table">' +
+          '<thead><tr>' +
+            '<th class="ra-th-name">Player</th>' +
+            '<th class="ra-th-num" title="Full-game minutes">MIN</th>' +
+            '<th class="ra-th-num">PTS</th>' +
+            '<th class="ra-th-num">REB</th>' +
+            '<th class="ra-th-num">FG</th>' +
+            '<th class="ra-th-num">3P</th>' +
+            '<th class="ra-th-num">FT</th>' +
+            '<th class="ra-th-num">TO</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function buildSituation(sit, sitClass, sitTitle) {
+    var hasData  = sit && sit.labels && sit.labels.length > 0;
+    var hasStats = hasData && (sit.starters || sit.bench);
+    var periods  = hasData ? sit.labels.join(' · ') : '—';
+
+    var body = '';
+    if (hasStats) {
+      body = buildGroup('Starters', sit.starters, sit.starter_players) +
+             buildGroup('Bench',    sit.bench,    sit.bench_players);
+    } else if (hasData) {
+      body = '<p class="empty ra-loading">Loading per-quarter data…</p>';
+    } else {
+      body = '<p class="ra-absent">No ' + sitTitle.toLowerCase() + ' quarters</p>';
+    }
+
+    return '<div class="ra-situation ra-' + sitClass + '">' +
+      '<div class="ra-sit-hdr">' +
+        '<span class="ra-sit-label ra-label-' + sitClass + '">' + sitTitle + '</span>' +
+        '<span class="' + (hasData ? 'ra-sit-periods' : 'ra-sit-none') + '">' + esc(periods) + '</span>' +
+      '</div>' +
+      body +
+    '</div>';
+  }
+
+  function buildTeam(side) {
+    var ps    = side.playoff_status || 'unknown';
+    var badge = '';
+    if      (ps === 'playoff') badge = ' <span class="ra-badge ra-badge-playoff">Playoff</span>';
+    else if (ps === 'playin')  badge = ' <span class="ra-badge ra-badge-playin">Play-In</span>';
+    else if (ps === 'none')    badge = ' <span class="ra-badge ra-badge-eliminated">Not in Playoffs</span>';
+
+    var body = ps === 'none'
+      ? '<p class="ra-absent">Rotation data not shown — team not in playoff contention.</p>'
+      : '<div class="ra-grid">' +
+          buildSituation(side.leading,  'leading',  'Leading')    +
+          buildSituation(side.close,    'close',    'Close Game') +
+          buildSituation(side.trailing, 'trailing', 'Trailing')   +
+        '</div>';
+
+    return '<div class="ra-team">' +
+      '<h3 class="ra-team-hdr">' + esc(side.abbr) + badge + '</h3>' +
+      body +
+    '</div>';
+  }
+
+  function renderRotationStats(rs) {
+    var el = document.getElementById('rotation-content');
+    if (!el) return;
+    if (!rs || !rs.has_data) {
+      el.innerHTML = '<p class="empty">Per-quarter data loading…</p>';
+      return;
+    }
+    // Update duration badge
+    if (rs.duration_label) setText('ra-duration-badge', rs.duration_label);
+    el.innerHTML = buildTeam(rs.visitor) + buildTeam(rs.home);
+    var badge = document.getElementById('ra-refresh-badge');
+    if (badge) badge.textContent = 'updated ' + new Date().toLocaleTimeString();
+  }
+
+  console.log('[NBA Live] Game detail poller started — game', gid, '| interval', POLL, 'ms');
+
+  // ── main poll ─────────────────────────────────────────────────────────────
+  function poll() {
+    var t0 = Date.now();
+    fetch('/api/game/' + gid)
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        var g = data.game;
+        console.log(
+          '[NBA Live]', gid, '— status:', g.game_status_id,
+          '| score:', g.visitor_abbr, g.visitor_pts, '-', g.home_pts, g.home_abbr,
+          '| players:', data.players.length,
+          '| round-trip:', (Date.now() - t0) + 'ms'
+        );
+
+        // scores & status
+        setText('score-vis',  g.visitor_pts !== null ? g.visitor_pts : '—');
+        setText('score-home', g.home_pts    !== null ? g.home_pts    : '—');
+        setText('live-status', '● LIVE · ' + g.status_text);
+
+        var heroes = document.querySelectorAll('.hero-team');
+        if (heroes.length >= 2 && g.visitor_pts !== null && g.home_pts !== null) {
+          heroes[0].classList.toggle('gd-winner', g.visitor_pts > g.home_pts);
+          heroes[1].classList.toggle('gd-winner', g.home_pts > g.visitor_pts);
+        }
+
+        // player rows
+        data.players.forEach(function(p) {
+          var tr = document.querySelector('tr[data-player-id="' + p.player_id + '"]');
+          if (tr) updatePlayerRow(tr, p);
+        });
+
+        // rotation analysis
+        if (data.rotation_stats) renderRotationStats(data.rotation_stats);
+
+        // game ended → reload
+        if (g.game_status_id !== 2) {
+          clearInterval(_iv);
+          setTimeout(function() { window.location.reload(); }, 1500);
+        }
+      })
+      .catch(function(e) {
+        console.error('[NBA Live] poll failed:', e);
+      });
+  }
+
+  // ── stint table renderer (live games only) ────────────────────────────────
+  function buildStintRow(s, showName, playerName, playerId, isStarter) {
+    var nameTd = '';
+    if (showName) {
+      var nm = playerId
+        ? '<a class="player-link" href="/players/' + playerId + '">' + esc(playerName || '?') + '</a>'
+        : esc(playerName || '?');
+      var dot = isStarter ? ' <span class="starter-dot">&#9679;</span>' : '';
+      nameTd = '<td class="st-td-name">' + nm + dot + '</td>';
+    } else {
+      nameTd = '<td class="st-td-name"></td>';
+    }
+    var exitTd = s.is_active
+      ? '<span class="st-active-badge">Active</span>'
+      : esc(s.exit_clock || '—');
+    var toWarn = (s.turnovers || 0) >= 2 ? ' st-to-warn' : '';
+    return '<tr class="stint-row ' + (showName ? 'stint-first' : 'stint-cont') + '">' +
+      nameTd +
+      '<td class="st-td-q">'    + esc(s.period_label || '') + '</td>' +
+      '<td class="st-td-clk">'  + esc(s.enter_clock  || '—') + '</td>' +
+      '<td class="st-td-clk">'  + exitTd + '</td>' +
+      '<td class="st-td-num">'  + esc(s.duration_str || '—') + '</td>' +
+      '<td class="st-td-num st-pts">' + (s.pts || 0) + '</td>' +
+      '<td class="st-td-num">'  + (s.reb || 0) + '</td>' +
+      '<td class="st-td-num st-shoot">' + (s.fgm||0) + '/' + (s.fga||0) + '</td>' +
+      '<td class="st-td-num st-shoot">' + (s.fg3m||0) + '/' + (s.fg3a||0) + '</td>' +
+      '<td class="st-td-num st-shoot">' + (s.ftm||0) + '/' + (s.fta||0) + '</td>' +
+      '<td class="st-td-num' + toWarn + '">' + (s.turnovers || 0) + '</td>' +
+    '</tr>';
+  }
+
+  function buildTotalsRow(player) {
+    var t  = player.totals || {};
+    var toWarn = (t.turnovers || 0) >= 2 ? ' st-to-warn' : '';
+    return '<tr class="stint-totals-row">' +
+      '<td class="st-td-name st-totals-label"><span class="st-total-min">Total ' +
+        esc(player.total_min_str || '') + '</span></td>' +
+      '<td class="st-td-q">—</td>' +
+      '<td class="st-td-clk">—</td>' +
+      '<td class="st-td-clk">—</td>' +
+      '<td class="st-td-num">' + esc(player.total_min_str || '—') + '</td>' +
+      '<td class="st-td-num st-pts">' + (t.pts || 0) + '</td>' +
+      '<td class="st-td-num">'  + (t.reb || 0) + '</td>' +
+      '<td class="st-td-num st-shoot">' + (t.fgm||0) + '/' + (t.fga||0) + '</td>' +
+      '<td class="st-td-num st-shoot">' + (t.fg3m||0) + '/' + (t.fg3a||0) + '</td>' +
+      '<td class="st-td-num st-shoot">' + (t.ftm||0) + '/' + (t.fta||0) + '</td>' +
+      '<td class="st-td-num' + toWarn + '">' + (t.turnovers || 0) + '</td>' +
+    '</tr>';
+  }
+
+  function buildStintTeam(side) {
+    var starters = (side.players || []).filter(function(p) { return p.is_starter; });
+    var bench    = (side.players || []).filter(function(p) { return !p.is_starter; });
+
+    function renderGroup(group, hdrLabel) {
+      if (!group.length) return '';
+      var html = '<tr class="stint-grp-hdr' + (hdrLabel === 'Bench' ? ' stint-bench-hdr' : '') +
+                 '"><td colspan="11">' + hdrLabel + '</td></tr>';
+      group.forEach(function(player) {
+        var stints = player.stints || [];
+        stints.forEach(function(s, i) {
+          html += buildStintRow(s, i === 0, player.player_name, player.player_id, player.is_starter);
+        });
+        if (stints.length > 1) {
+          html += buildTotalsRow(player);
+        }
+      });
+      return html;
+    }
+
+    return '<div class="stint-team">' +
+      '<h3 class="stint-team-hdr">' + esc(side.abbr) + '</h3>' +
+      '<div class="table-wrap">' +
+        '<table class="stint-table">' +
+          '<thead><tr>' +
+            '<th class="st-th-name">Player</th>' +
+            '<th class="st-th-q">Q</th>' +
+            '<th class="st-th-clk" title="Elapsed from period start">Entered</th>' +
+            '<th class="st-th-clk" title="Elapsed from period start">Exited</th>' +
+            '<th class="st-th-num" title="Stint duration">DUR</th>' +
+            '<th class="st-th-num">PTS</th>' +
+            '<th class="st-th-num">REB</th>' +
+            '<th class="st-th-num">FG</th>' +
+            '<th class="st-th-num">3P</th>' +
+            '<th class="st-th-num">FT</th>' +
+            '<th class="st-th-num">TO</th>' +
+          '</tr></thead>' +
+          '<tbody>' +
+            renderGroup(starters, 'Starters') +
+            renderGroup(bench,    'Bench') +
+          '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // ── stints: badge + error bar helpers ─────────────────────────────────────
+  function updateStintsBadge(data) {
+    var badge = document.getElementById('stints-refresh-badge');
+    if (!badge) return;
+    if (data && data.stints_updated_at) {
+      // stints_updated_at is UTC ISO from DB; convert to local time
+      var d = new Date(data.stints_updated_at.replace(' ', 'T') + 'Z');
+      var now = new Date();
+      var ageSec = Math.round((now - d) / 1000);
+      var ageStr = ageSec < 60
+        ? ageSec + 's ago'
+        : Math.round(ageSec / 60) + 'm ago';
+      badge.textContent = 'computed ' + ageStr;
+      // Warn if data is more than 3 minutes old for a live game
+      if (data.game_status_id === 2 && ageSec > 180) {
+        badge.style.color = 'var(--red)';
+        badge.title = 'Data may be stale — click Refresh to recompute';
+      } else {
+        badge.style.color = '';
+        badge.title = '';
+      }
+    } else {
+      badge.textContent = data && data.has_data ? 'updated ' + new Date().toLocaleTimeString() : '';
+    }
+  }
+
+  function showStintsError(msg) {
+    var el = document.getElementById('stints-error');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+
+  function triggerStintsRefresh() {
+    var btn = document.getElementById('stints-refresh-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Refreshing…'; }
+    fetch('/api/game/' + gid + '/stints/refresh', { method: 'POST' })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        // Poll quickly after triggering
+        setTimeout(pollStints, 3000);
+        setTimeout(pollStints, 8000);
+      })
+      .catch(function(e) { showStintsError('Refresh failed: ' + e.message); })
+      .finally(function() {
+        setTimeout(function() {
+          if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+        }, 10000);
+      });
+  }
+
+  function renderStints(data) {
+    var el = document.getElementById('stints-content');
+    if (!el) return;
+    showStintsError('');
+    if (!data || !data.has_data) {
+      // Don't overwrite the server-rendered empty message — just update badge
+      updateStintsBadge(data);
+      return;
+    }
+    el.innerHTML = '<div class="stint-grid">' +
+      buildStintTeam(data.visitor) + buildStintTeam(data.home) +
+    '</div>';
+    updateStintsBadge(data);
+  }
+
+  // Poll stints every 60 s — stints update when periods end or during live games
+  function pollStints() {
+    fetch('/api/game/' + gid + '/stints')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) { renderStints(data); })
+      .catch(function(e) {
+        console.error('[NBA Stints] poll failed:', e);
+        showStintsError('Could not load substitution data — will retry shortly.');
+      });
+  }
+  pollStints();
+  setInterval(pollStints, 60000);
+
+  poll();
+  var _iv = setInterval(poll, POLL);
+})();
+</script>
+{% endif %}
+
+{# ── Debug inspector — all games ──────────────────────────────────────── #}
+<script>
+(function() {
+  'use strict';
+
+  // ── state ──────────────────────────────────────────────────────────────
+  var _debugActive = (new URLSearchParams(window.location.search).get('debug') === '1');
+  var _lastStintsData = null;
+  var _lastStintsUrl  = null;
+  var _lastGameData   = null;
+  var _lastGameUrl    = null;
+
+  // ── public toggle (called by buttons and keyboard) ─────────────────────
+  window.toggleDebug = function() {
+    _debugActive = !_debugActive;
+    var panel = document.getElementById('debug-panel');
+    if (panel) panel.style.display = _debugActive ? 'block' : 'none';
+    if (_debugActive) refreshDebugViews();
+  };
+
+  // ── tab switching ──────────────────────────────────────────────────────
+  window.switchDebugTab = function(name) {
+    document.querySelectorAll('.debug-tab').forEach(function(b) {
+      b.classList.toggle('debug-tab-active', b.dataset.tab === name);
+    });
+    document.querySelectorAll('.debug-pane').forEach(function(p) {
+      p.style.display = p.id === 'debug-pane-' + name ? 'block' : 'none';
+    });
+    if (name === 'diagnostics' && _lastStintsData) {
+      renderDiagnostics(_lastStintsData);
+    }
+  };
+
+  // ── keyboard shortcut Ctrl+Shift+D ────────────────────────────────────
+  document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+      e.preventDefault();
+      toggleDebug();
+    }
+  });
+
+  // ── helpers ────────────────────────────────────────────────────────────
+  function prettyJson(obj) {
+    try { return JSON.stringify(obj, null, 2); }
+    catch(_) { return String(obj); }
+  }
+
+  function el(id) { return document.getElementById(id); }
+
+  function setDebugMeta(id, url, status, durationMs, ts) {
+    var e = el(id);
+    if (!e) return;
+    e.innerHTML =
+      '<span class="debug-url">' + url + '</span>' +
+      ' &nbsp;·&nbsp; <span class="debug-status debug-status-' + (status < 300 ? 'ok' : 'err') +
+      '">' + status + '</span>' +
+      ' &nbsp;·&nbsp; ' + durationMs + ' ms' +
+      ' &nbsp;·&nbsp; ' + ts;
+  }
+
+  function setDebugJson(id, data) {
+    var e = el(id);
+    if (e) e.textContent = prettyJson(data);
+  }
+
+  // ── fetch wrapper with debug capture ──────────────────────────────────
+  function debugFetch(url, storeKey) {
+    var t0 = Date.now();
+    return fetch(url)
+      .then(function(r) {
+        var status = r.status;
+        var dur = Date.now() - t0;
+        var ts = new Date().toLocaleTimeString();
+        return r.json().then(function(data) {
+          if (storeKey === 'stints') {
+            _lastStintsData = data;
+            _lastStintsUrl  = url;
+            if (_debugActive) {
+              setDebugMeta('debug-stints-meta', url, status, dur, ts);
+              setDebugJson('debug-stints-json', data);
+              renderStintsFlags(data);
+              renderDiagnostics(data);
+            }
+          } else {
+            _lastGameData = data;
+            _lastGameUrl  = url;
+            if (_debugActive) {
+              setDebugMeta('debug-game-meta', url, status, dur, ts);
+              setDebugJson('debug-game-json', data);
+            }
+          }
+          return data;
+        });
+      });
+  }
+
+  // ── flag suspicious stints values ─────────────────────────────────────
+  function renderStintsFlags(data) {
+    var flagEl = el('debug-stints-flags');
+    if (!flagEl) return;
+    if (!data || !data.has_data) {
+      flagEl.innerHTML = '';
+      return;
+    }
+
+    var flags = [];
+    var allEnterClocks = [];
+    var teams = [data.visitor, data.home].filter(Boolean);
+
+    teams.forEach(function(team) {
+      (team.players || []).forEach(function(player) {
+        (player.stints || []).forEach(function(s) {
+          allEnterClocks.push(s.enter_clock);
+          var enterSecs = s.enter_secs;
+          // "0:00" elapsed = player started at period tip (enter_secs == period_secs)
+          if (s.enter_clock === '0:00') {
+            flags.push({
+              cls: 'flag-info',
+              msg: player.player_name + ' Q' + s.period +
+                   ': enter_clock = 0:00 (started at period tip)',
+            });
+          }
+          // "12:00" or "5:00" elapsed at ENTRY is suspicious (would mean entered near end)
+          if (s.enter_clock === '12:00' || s.enter_clock === '5:00') {
+            flags.push({
+              cls: 'flag-warn',
+              msg: player.player_name + ' Q' + s.period +
+                   ': enter_clock = ' + s.enter_clock + ' — looks like remaining time stored instead of elapsed',
+            });
+          }
+          // Duration of 0
+          if (s.duration_str === '0:00' || s.minutes_played === 0) {
+            flags.push({
+              cls: 'flag-warn',
+              msg: player.player_name + ' Q' + s.period + ': zero-duration stint',
+            });
+          }
+          // is_active on a non-live game
+          if (s.is_active && data.game_status_id !== 2) {
+            flags.push({
+              cls: 'flag-warn',
+              msg: player.player_name + ' Q' + s.period +
+                   ': is_active=true but game_status_id=' + data.game_status_id,
+            });
+          }
+        });
+      });
+    });
+
+    // Check if ALL enter_clocks are identical (mass pre-seeding at period start)
+    var unique = allEnterClocks.filter(function(v, i, a) { return a.indexOf(v) === i; });
+    if (allEnterClocks.length > 5 && unique.length === 1) {
+      flags.unshift({
+        cls: 'flag-error',
+        msg: 'ALL ' + allEnterClocks.length + ' stints have the same enter_clock "' +
+             unique[0] + '" — substitution parsing likely failed; all players set to period start.',
+      });
+    }
+
+    if (!flags.length) {
+      flagEl.innerHTML = '<div class="flag flag-ok">&#10003; No suspicious clock values found.</div>';
+      return;
+    }
+    flagEl.innerHTML = flags.map(function(f) {
+      return '<div class="flag ' + f.cls + '">' + f.msg + '</div>';
+    }).join('');
+  }
+
+  // ── diagnostics tab ───────────────────────────────────────────────────
+  function renderDiagnostics(data) {
+    var body = el('debug-diagnostics-body');
+    if (!body) return;
+    if (!data || !data.has_data) {
+      body.innerHTML = '<p class="debug-diag-hint">No stints data available yet.</p>';
+      return;
+    }
+
+    var html = '';
+    html += '<div class="diag-meta">';
+    html += '<b>game_status_id:</b> ' + (data.game_status_id || '?') + ' &nbsp;';
+    html += '<b>stints_updated_at:</b> ' + (data.stints_updated_at || 'null');
+    html += '</div>';
+
+    var teams = [
+      { key: 'visitor', side: data.visitor },
+      { key: 'home',    side: data.home    },
+    ];
+
+    teams.forEach(function(t) {
+      if (!t.side) return;
+      html += '<h3 class="diag-team-hdr">' + t.side.abbr + '</h3>';
+      html += '<table class="diag-table"><thead><tr>' +
+        '<th>Player</th><th>S?</th><th>Q</th>' +
+        '<th>Entered&nbsp;<small>(elapsed)</small></th>' +
+        '<th>Exited&nbsp;<small>(elapsed)</small></th>' +
+        '<th>DUR</th><th>enter_secs</th><th>exit_secs</th>' +
+        '<th>Active?</th><th>PTS</th><th>REB</th><th>FG</th>' +
+        '</tr></thead><tbody>';
+
+      (t.side.players || []).forEach(function(player) {
+        (player.stints || []).forEach(function(s, i) {
+          var warn = (s.enter_clock === '12:00' || s.enter_clock === '5:00' ||
+                     s.duration_str === '0:00') ? ' diag-row-warn' : '';
+          html += '<tr class="diag-row' + warn + '">' +
+            '<td class="diag-name">' + (i === 0 ? player.player_name : '') + '</td>' +
+            '<td>' + (player.is_starter ? '&#9679;' : '') + '</td>' +
+            '<td>' + s.period + '</td>' +
+            '<td class="diag-clk' + (s.enter_clock === '0:00' ? ' diag-tip' : '') + '">' +
+              s.enter_clock + '</td>' +
+            '<td class="diag-clk' + (s.is_active ? ' diag-active' : '') + '">' +
+              (s.is_active ? '<b>Active</b>' : s.exit_clock) + '</td>' +
+            '<td>' + (s.duration_str || '—') + '</td>' +
+            '<td class="diag-secs">' + (s.enter_secs !== undefined ? s.enter_secs.toFixed(1) : '?') + '</td>' +
+            '<td class="diag-secs">' + (s.exit_secs  !== undefined ? s.exit_secs.toFixed(1)  : '?') + '</td>' +
+            '<td>' + (s.is_active ? '&#128994;' : '') + '</td>' +
+            '<td>' + (s.pts || 0) + '</td>' +
+            '<td>' + (s.reb || 0) + '</td>' +
+            '<td>' + (s.fgm || 0) + '/' + (s.fga || 0) + '</td>' +
+            '</tr>';
+        });
+      });
+      html += '</tbody></table>';
+    });
+
+    body.innerHTML = html;
+  }
+
+  // ── populate views when panel opens ───────────────────────────────────
+  function refreshDebugViews() {
+    if (_lastStintsData) {
+      setDebugMeta('debug-stints-meta', _lastStintsUrl || '—', 200, '—',
+                   'cached from last poll');
+      setDebugJson('debug-stints-json', _lastStintsData);
+      renderStintsFlags(_lastStintsData);
+      renderDiagnostics(_lastStintsData);
+    }
+    if (_lastGameData) {
+      setDebugMeta('debug-game-meta', _lastGameUrl || '—', 200, '—',
+                   'cached from last poll');
+      setDebugJson('debug-game-json', _lastGameData);
+    }
+  }
+
+  // ── intercept the existing poll functions ──────────────────────────────
+  // Wrap pollStints and poll to also update debug state.
+  // We patch them after the IIFE that defines them finishes by
+  // overriding the module-private fetch calls via our own polling here.
+
+  var _gid = "{{ game.game_id }}";
+
+  function debugPollStints() {
+    debugFetch('/api/game/' + _gid + '/stints', 'stints').catch(function(){});
+  }
+  function debugPollGame() {
+    debugFetch('/api/game/' + _gid, 'game').catch(function(){});
+  }
+
+  // Run once immediately, then every 60s (stints) / 20s (game)
+  // These are parallel to (not replacing) the live-game polling above.
+  debugPollStints();
+  debugPollGame();
+  setInterval(debugPollStints, 60000);
+  setInterval(debugPollGame,   20000);
+
+  // Show panel on load if ?debug=1
+  if (_debugActive) {
+    var panel = document.getElementById('debug-panel');
+    if (panel) panel.style.display = 'block';
+  }
+})();
+</script>
+{% endblock %}
